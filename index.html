@@ -13,15 +13,16 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
-    <!-- Dependencies for Recharts UMD -->
+    <!-- Dependencies required for Recharts -->
+    <!-- Prop-types is required by Recharts UMD -->
     <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     
-    <!-- React & ReactDOM (UMD) -->
+    <!-- React & ReactDOM (UMD) - Version 18.2.0 stable -->
     <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js"></script>
     
-    <!-- Recharts (UMD) - Specific version known to work with UMD -->
-    <script crossorigin src="https://unpkg.com/recharts@2.10.3/umd/Recharts.min.js"></script>
+    <!-- Recharts (UMD) - Version 2.12.7 (Stable) -->
+    <script crossorigin src="https://unpkg.com/recharts@2.12.7/umd/Recharts.min.js"></script>
     
     <!-- Babel for JSX -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
@@ -51,17 +52,20 @@
 
     <script type="text/babel">
         // --- 1. GLOBALS & SETUP ---
-        // Access libraries from the global window object (UMD style)
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
         const { createRoot } = ReactDOM;
         
         // Safety check for Recharts
         const Recharts = window.Recharts || {};
-        const { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
-
-        if (!window.Recharts) {
-            console.warn("Recharts library failed to load. Charts will not display.");
-        }
+        // Default to empty components if library fails to load to prevent white screen crash
+        const { 
+            BarChart = () => null, 
+            Bar = () => null, 
+            XAxis = () => null, 
+            Tooltip = () => null, 
+            ResponsiveContainer = ({children}) => <div>{children}</div>, 
+            Cell = () => null 
+        } = Recharts;
 
         // --- 2. ICONS (Inline Replacement for lucide-react) ---
         const IconBase = ({ children, size = 24, className = "", ...props }) => (
@@ -356,8 +360,10 @@
             };
             const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
-            if (!BarChart) {
-                return <div className="p-8 text-center text-red-500 bg-red-50 rounded-lg">Erreur: La librairie graphique (Recharts) n'a pas pu être chargée. Vérifiez votre connexion internet.</div>;
+            if (!window.Recharts) {
+                 // Simple fallback text instead of red error if loading takes time or fails partially
+                 // But typically the updated script tags should fix the root cause.
+                 return <div className="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">Chargement des graphiques... (Si ce message persiste, rechargez la page)</div>;
             }
 
             return (
@@ -676,7 +682,7 @@
             );
         };
 
-        const root = createRoot(document.getElementById('root'));
+        const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
 </body>

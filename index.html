@@ -188,19 +188,39 @@
             const timerRef = useRef(null);
             const [now, setNow] = useState(new Date());
 
+            // Clock for the header
             useEffect(() => {
                 const interval = setInterval(() => setNow(new Date()), 60000);
                 return () => clearInterval(interval);
             }, []);
 
+            // Timer Logic
             useEffect(() => {
                 if (activeStudentId) {
                     timerRef.current = window.setInterval(() => {
+                        const currentResult = currentSession.results[activeStudentId];
+                        const currentPassages = currentResult?.passages || [];
+                        
+                        let newPassages = [...currentPassages];
+                        if (newPassages.length === 0) {
+                            if ((currentResult?.total || 0) > 0) {
+                                newPassages = [currentResult.total];
+                            } else {
+                                newPassages = [0];
+                            }
+                        }
+
+                        // Increment the last passage
+                        newPassages[newPassages.length - 1] = newPassages[newPassages.length - 1] + 1;
+
                         onSessionUpdate({
                             ...currentSession,
                             results: {
                                 ...currentSession.results,
-                                [activeStudentId]: { total: (currentSession.results[activeStudentId]?.total || 0) + 1 }
+                                [activeStudentId]: {
+                                    total: (currentResult?.total || 0) + 1,
+                                    passages: newPassages
+                                }
                             }
                         });
                     }, 1000);
@@ -211,14 +231,40 @@
                 return () => { if (timerRef.current) clearInterval(timerRef.current); };
             }, [activeStudentId, currentSession, onSessionUpdate]);
 
+            // Persist frequently
             useEffect(() => {
                 const save = async () => await storageService.saveSession(currentSession);
                 const debounce = setTimeout(save, 5000);
                 return () => clearTimeout(debounce);
             }, [currentSession]);
 
-            const toggleTimer = (id) => setActiveStudentId(activeStudentId === id ? null : id);
-            
+            const toggleTimer = (id) => {
+                const result = currentSession.results[id];
+                if (!result || !result.passages || result.passages.length === 0) {
+                   const initialTotal = result?.total || 0;
+                   const initialPassages = result?.passages || (initialTotal > 0 ? [initialTotal] : [0]);
+                   onSessionUpdate({
+                     ...currentSession,
+                     results: { ...currentSession.results, [id]: { total: initialTotal, passages: initialPassages } }
+                   });
+                }
+                setActiveStudentId(activeStudentId === id ? null : id);
+            };
+
+            const startNewPassage = (e, id) => {
+                e.stopPropagation();
+                const result = currentSession.results[id];
+                if (!result) return;
+                const currentPassages = result.passages || (result.total > 0 ? [result.total] : [0]);
+                onSessionUpdate({
+                  ...currentSession,
+                  results: {
+                    ...currentSession.results,
+                    [id]: { ...result, passages: [...currentPassages, 0] }
+                  }
+                });
+            };
+
             const handleOpenModal = () => {
                 setTempSelectedStudents(new Set(Object.keys(currentSession.results)));
                 setIsModalOpen(true);
@@ -232,7 +278,9 @@
 
             const confirmStudentSelection = () => {
                 const newResults = { ...currentSession.results };
-                tempSelectedStudents.forEach(id => { if (!newResults[id]) newResults[id] = { total: 0 }; });
+                tempSelectedStudents.forEach(id => { 
+                    if (!newResults[id]) newResults[id] = { total: 0, passages: [0] }; 
+                });
                 Object.keys(newResults).forEach(id => {
                     if (!tempSelectedStudents.has(id) && newResults[id].total === 0) delete newResults[id];
                 });
@@ -279,19 +327,38 @@
                                 activeParticipantIds.map((id) => {
                                     const student = students.find((s) => s.id === id);
                                     if (!student) return null;
+                                    const result = currentSession.results[id];
                                     const isActive = activeStudentId === id;
+                                    const passages = result.passages || (result.total > 0 ? [result.total] : [0]);
+                                    const currentPassageIndex = passages.length - 1;
+                                    const currentPassageTime = passages[currentPassageIndex];
+
                                     return (
-                                        <div key={id} className={`bg-white p-4 rounded-xl shadow-sm border transition-all duration-300 ${isActive ? 'border-red-400 shadow-red-100 ring-1 ring-red-50 scale-[1.02]' : 'border-gray-200 hover:border-indigo-200'} flex items-center justify-between group`}>
-                                            <div className="flex-1 min-w-0 pr-4">
-                                                <h3 className={`font-bold text-lg truncate ${isActive ? 'text-indigo-900' : 'text-gray-700'}`}>{student.name}</h3>
+                                        <div key={id} className={`bg-white p-4 rounded-xl shadow-sm border transition-all duration-300 ${isActive ? 'border-indigo-400 shadow-indigo-100 ring-1 ring-indigo-50 scale-[1.02]' : 'border-gray-200 hover:border-indigo-200'} flex flex-col sm:flex-row items-center justify-between gap-4 group`}>
+                                            <div className="flex-1 min-w-0 w-full sm:w-auto flex items-center gap-3">
+                                                 <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>{passages.length}</div>
+                                                 <div className="flex-1">
+                                                     <h3 className={`font-bold text-lg truncate ${isActive ? 'text-indigo-900' : 'text-gray-700'}`}>{student.name}</h3>
+                                                     <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
+                                                        <Icons.History size={12} />
+                                                        <span>Total: {formatTime(result.total)}</span>
+                                                        {passages.length > 1 && <span>• Dernier: {formatTime(passages[currentPassageIndex - 1] || 0)}</span>}
+                                                     </div>
+                                                 </div>
                                             </div>
-                                            <div className="flex items-center gap-4">
-                                                <div className={`font-mono text-2xl font-bold w-24 text-right tabular-nums ${isActive ? 'text-red-600' : 'text-indigo-600'}`}>
-                                                    {formatTime(currentSession.results[id].total)}
+
+                                            <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+                                                <div className="flex flex-col items-end">
+                                                    <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Passage {passages.length}</span>
+                                                    <div className={`font-mono text-3xl font-bold w-28 text-right tabular-nums ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}>{formatTime(currentPassageTime)}</div>
                                                 </div>
-                                                <button onClick={() => toggleTimer(id)} className={`h-12 w-12 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${isActive ? 'bg-red-500 text-white ring-red-300 animate-pulse' : 'bg-gray-100 text-gray-600 hover:bg-indigo-100 hover:text-indigo-600 ring-gray-200'}`}>
-                                                    {isActive ? <Icons.Pause className="fill-current" size={20} /> : <Icons.Play className="fill-current ml-1" size={20} />}
-                                                </button>
+
+                                                <div className="flex items-center gap-2">
+                                                    <button onClick={(e) => startNewPassage(e, id)} className="h-10 w-10 rounded-lg flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200 transition-all active:scale-95"><Icons.Plus size={18} /></button>
+                                                    <button onClick={() => toggleTimer(id)} className={`h-12 w-12 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${isActive ? 'bg-indigo-600 text-white ring-indigo-300' : 'bg-white text-gray-700 hover:bg-gray-50 ring-gray-200 border border-gray-100'}`}>
+                                                        {isActive ? <Icons.Pause className="fill-current" size={20} /> : <Icons.Play className="fill-current ml-1" size={20} />}
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     );
@@ -361,9 +428,7 @@
             const formatTime = (s) => `${Math.floor(s / 60).toString().padStart(2, '0')}:${(s % 60).toString().padStart(2, '0')}`;
 
             if (!window.Recharts) {
-                 // Simple fallback text instead of red error if loading takes time or fails partially
-                 // But typically the updated script tags should fix the root cause.
-                 return <div className="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">Chargement des graphiques... (Si ce message persiste, rechargez la page)</div>;
+                 return <div className="p-8 text-center text-gray-500 bg-gray-50 rounded-lg">Chargement des graphiques...</div>;
             }
 
             return (
@@ -492,8 +557,7 @@
             const [sessions, setSessions] = useState([]);
             const [selectedSessionId, setSelectedSessionId] = useState(null);
             const [loading, setLoading] = useState(false);
-            const [editValues, setEditValues] = useState({});
-            const [justSaved, setJustSaved] = useState({});
+            const [newPassageValues, setNewPassageValues] = useState({});
             const [isAddModalOpen, setIsAddModalOpen] = useState(false);
             const [tempSelected, setTempSelected] = useState(new Set());
 
@@ -510,16 +574,11 @@
             useEffect(() => { loadSessionsForDate(selectedDate); }, [selectedDate]);
             const currentSession = sessions.find(s => s.id === selectedSessionId);
 
-            useEffect(() => {
-                if (currentSession) {
-                    const vals = {};
-                    Object.entries(currentSession.results).forEach(([id, res]) => {
-                        const m = Math.floor(res.total / 60), s = res.total % 60;
-                        vals[id] = { m: m.toString(), s: s.toString() };
-                    });
-                    setEditValues(vals);
-                }
-            }, [currentSession]);
+            const getPassages = (res) => {
+                if (res.passages && res.passages.length > 0) return res.passages;
+                if (res.total > 0) return [res.total];
+                return [];
+            };
 
             const createNewSession = async () => {
                 const id = `${selectedDate}_${Date.now()}`;
@@ -527,33 +586,66 @@
                 await loadSessionsForDate(selectedDate); setSelectedSessionId(id);
             };
 
-            const handleSaveRow = async (studentId) => {
+            const handleAddPassage = async (studentId) => {
                 if (!currentSession) return;
-                const vals = editValues[studentId]; if (!vals) return;
-                const total = ((parseInt(vals.m)||0) * 60) + (parseInt(vals.s)||0);
-                const updatedSession = { ...currentSession, results: { ...currentSession.results, [studentId]: { total } } };
-                await storageService.saveSession(updatedSession); onSessionUpdate(updatedSession);
-                setJustSaved(prev => ({ ...prev, [studentId]: true }));
-                setTimeout(() => setJustSaved(prev => ({ ...prev, [studentId]: false })), 1500);
-                setSessions(sessions.map(s => s.id === updatedSession.id ? updatedSession : s));
+                const vals = newPassageValues[studentId];
+                if (!vals) return;
+                const m = parseInt(vals.m) || 0;
+                const s = parseInt(vals.s) || 0;
+                const duration = (m * 60) + s;
+                
+                const currentResult = currentSession.results[studentId];
+                const currentPassages = getPassages(currentResult);
+                const newPassages = [...currentPassages, duration];
+                const newTotal = newPassages.reduce((a, b) => a + b, 0);
+
+                const updatedSession = { ...currentSession, results: { ...currentSession.results, [studentId]: { total: newTotal, passages: newPassages } } };
+                await saveAndUpdate(updatedSession);
+                setNewPassageValues(prev => ({ ...prev, [studentId]: { m: '', s: '' } }));
             };
 
-            const handleDeleteRow = async (studentId) => {
+            const handleDeletePassage = async (studentId, index) => {
+                if (!currentSession) return;
+                const currentResult = currentSession.results[studentId];
+                const newPassages = [...getPassages(currentResult)];
+                newPassages.splice(index, 1);
+                const newTotal = newPassages.reduce((a, b) => a + b, 0);
+                const updatedSession = { ...currentSession, results: { ...currentSession.results, [studentId]: { total: newTotal, passages: newPassages } } };
+                await saveAndUpdate(updatedSession);
+            };
+
+            const handleDeleteStudent = async (studentId) => {
                 if (!currentSession || !window.confirm("Retirer cet élève de la session ?")) return;
                 const newResults = { ...currentSession.results }; delete newResults[studentId];
                 const updatedSession = { ...currentSession, results: newResults };
-                await storageService.saveSession(updatedSession); onSessionUpdate(updatedSession);
-                setSessions(sessions.map(s => s.id === updatedSession.id ? updatedSession : s));
+                await saveAndUpdate(updatedSession);
+            };
+
+            const saveAndUpdate = async (session) => {
+                await storageService.saveSession(session);
+                onSessionUpdate(session);
+                setSessions(prev => prev.map(s => s.id === session.id ? session : s));
+            };
+
+            const handleInputChange = (studentId, field, value) => {
+                setNewPassageValues(prev => ({
+                    ...prev, [studentId]: { ...(prev[studentId] || {m:'', s:''}), [field]: value }
+                }));
             };
 
             const openAddModal = () => { setTempSelected(new Set(Object.keys(currentSession?.results || {}))); setIsAddModalOpen(true); };
             const confirmAddStudents = async () => {
                 if (!currentSession) return;
                 const newResults = { ...currentSession.results };
-                tempSelected.forEach(id => { if (!newResults[id]) newResults[id] = { total: 0 }; });
+                tempSelected.forEach(id => { if (!newResults[id]) newResults[id] = { total: 0, passages: [] }; });
                 const updatedSession = { ...currentSession, results: newResults };
-                await storageService.saveSession(updatedSession); onSessionUpdate(updatedSession);
-                setSessions(sessions.map(s => s.id === updatedSession.id ? updatedSession : s)); setIsAddModalOpen(false);
+                await saveAndUpdate(updatedSession); setIsAddModalOpen(false);
+            };
+            
+            const formatTime = (seconds) => {
+                const m = Math.floor(seconds / 60);
+                const s = seconds % 60;
+                return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
             };
 
             return (
@@ -575,23 +667,35 @@
                             {loading ? <div className="text-center py-10 text-gray-400">Chargement...</div> : !currentSession ? (
                                 <div className="text-center py-12 border-2 border-dashed border-gray-200 rounded-xl"><p className="text-gray-500 mb-4">Aucune session pour cette date.</p><Button onClick={createNewSession}>Créer une session</Button></div>
                             ) : (
-                                <div className="space-y-4">
+                                <div className="space-y-6">
                                     {Object.keys(currentSession.results).length === 0 ? <div className="text-center py-8 text-gray-400">Cette session est vide.</div> : Object.keys(currentSession.results).map(studentId => {
                                         const student = students.find(s => s.id === studentId);
-                                        if (!student || !editValues[studentId]) return null;
+                                        if (!student) return null;
+                                        const result = currentSession.results[studentId];
+                                        const passages = getPassages(result);
+                                        const inputs = newPassageValues[studentId] || { m: '', s: '' };
+
                                         return (
-                                            <div key={studentId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                                                <div className="flex-1 w-full sm:w-auto text-left"><label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">Élève</label><div className="font-bold text-lg text-gray-800">{student.name}</div></div>
-                                                <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-                                                    <div className="flex items-end gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                                                        <div><label className="text-[10px] text-gray-400 uppercase block text-center">Min</label><input type="number" min="0" className="w-16 p-1 border border-gray-300 rounded text-center font-mono font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none" value={editValues[studentId].m} onChange={(e) => setEditValues(prev => ({...prev, [studentId]: {...prev[studentId], m: e.target.value}}))} /></div>
-                                                        <span className="mb-2 font-bold text-gray-400">:</span>
-                                                        <div><label className="text-[10px] text-gray-400 uppercase block text-center">Sec</label><input type="number" min="0" max="59" className="w-16 p-1 border border-gray-300 rounded text-center font-mono font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none" value={editValues[studentId].s} onChange={(e) => setEditValues(prev => ({...prev, [studentId]: {...prev[studentId], s: e.target.value}}))} /></div>
+                                            <div key={studentId} className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
+                                                <div className="flex-1 w-full md:w-auto">
+                                                    <div className="flex items-center gap-2 mb-2"><div className="font-bold text-lg text-gray-800">{student.name}</div><span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Élève</span></div>
+                                                    <div className="flex flex-wrap gap-2">
+                                                        {passages.length === 0 && <span className="text-sm text-gray-400 italic">Aucun temps</span>}
+                                                        {passages.map((p, idx) => (
+                                                            <div key={idx} className="group relative bg-gray-50 text-gray-700 px-3 py-1 rounded-md font-mono text-sm font-medium flex items-center border border-gray-100 hover:border-red-200 transition-all cursor-default">
+                                                                {formatTime(p)}
+                                                                <button onClick={() => handleDeletePassage(studentId, idx)} className="absolute -top-1.5 -right-1.5 bg-white text-red-500 rounded-full border border-gray-200 shadow-sm p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"><Icons.X size={10} /></button>
+                                                            </div>
+                                                        ))}
+                                                        {passages.length > 0 && <div className="flex items-center gap-1.5 ml-1 px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md"><Icons.Clock size={12} /><span className="font-mono text-xs font-bold">{formatTime(result.total)}</span></div>}
                                                     </div>
-                                                    <div className="flex gap-2">
-                                                        <button onClick={() => handleSaveRow(studentId)} className={`p-2.5 rounded-lg transition-all shadow-sm ${justSaved[studentId] ? 'bg-green-500 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>{justSaved[studentId] ? <Icons.Check size={18} /> : <Icons.Save size={18} />}</button>
-                                                        <button onClick={() => handleDeleteRow(studentId)} className="p-2.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"><Icons.Trash2 size={18} /></button>
-                                                    </div>
+                                                </div>
+                                                <div className="flex items-end gap-2 w-full md:w-auto justify-end">
+                                                    <div className="flex flex-col items-center"><label className="text-[10px] text-gray-300 font-bold uppercase tracking-wider mb-1">Min</label><input type="number" min="0" className="w-14 h-10 border border-gray-200 rounded-lg text-center font-bold text-gray-700 focus:ring-2 focus:ring-indigo-300 outline-none transition-all placeholder-gray-200" placeholder="0" value={inputs.m} onChange={(e) => handleInputChange(studentId, 'm', e.target.value)} /></div>
+                                                    <div className="h-10 flex items-center pb-1 text-gray-300 font-bold">:</div>
+                                                    <div className="flex flex-col items-center"><label className="text-[10px] text-gray-300 font-bold uppercase tracking-wider mb-1">Sec</label><input type="number" min="0" max="59" className="w-14 h-10 border border-gray-200 rounded-lg text-center font-bold text-gray-700 focus:ring-2 focus:ring-indigo-300 outline-none transition-all placeholder-gray-200" placeholder="0" value={inputs.s} onChange={(e) => handleInputChange(studentId, 's', e.target.value)} /></div>
+                                                    <button onClick={() => handleAddPassage(studentId)} className="h-10 w-10 bg-indigo-400 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center transition-colors shadow-sm ml-1" title="Sauvegarder" disabled={(!inputs.m && !inputs.s)}><Icons.Save size={20} /></button>
+                                                    <button onClick={() => handleDeleteStudent(studentId)} className="h-10 w-10 text-gray-300 hover:text-red-400 flex items-center justify-center transition-colors ml-1"><Icons.Trash2 size={18} /></button>
                                                 </div>
                                             </div>
                                         );

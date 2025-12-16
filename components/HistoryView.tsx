@@ -3,7 +3,7 @@ import { Session, Student, SessionResult } from '../types';
 import { storageService } from '../services/storageService';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
-import { Calendar, Save, Trash2, PlusCircle, Check } from 'lucide-react';
+import { Calendar, Trash2, PlusCircle, X, Clock, Save } from 'lucide-react';
 
 interface HistoryViewProps {
   students: Student[];
@@ -16,10 +16,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
   const [selectedSessionId, setSelectedSessionId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Edit State
-  const [editValues, setEditValues] = useState<Record<string, {m: string, s: string}>>({});
-  const [justSaved, setJustSaved] = useState<Record<string, boolean>>({});
-
+  // Stores the "Add Passage" input values for each student row
+  const [newPassageValues, setNewPassageValues] = useState<Record<string, {m: string, s: string}>>({});
+  
   // Add student modal
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
   const [tempSelected, setTempSelected] = useState<Set<string>>(new Set());
@@ -29,7 +28,6 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
     const loaded = await storageService.getSessionsByDatePrefix(date);
     setSessions(loaded);
     if (loaded.length > 0) {
-        // If current selection is not in list, select first
         if (!selectedSessionId || !loaded.find(s => s.id === selectedSessionId)) {
             setSelectedSessionId(loaded[0].id);
         }
@@ -45,22 +43,13 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
 
   const currentSession = sessions.find(s => s.id === selectedSessionId);
 
-  // Sync edit values when session changes
-  useEffect(() => {
-    if (currentSession) {
-      const vals: Record<string, {m: string, s: string}> = {};
-      Object.entries(currentSession.results).forEach(([id, res]) => {
-        const r = res as SessionResult;
-        const m = Math.floor(r.total / 60);
-        const s = r.total % 60;
-        vals[id] = { m: m.toString(), s: s.toString() };
-      });
-      setEditValues(vals);
-    }
-  }, [currentSession]);
+  const getPassages = (res: SessionResult) => {
+      if (res.passages && res.passages.length > 0) return res.passages;
+      if (res.total > 0) return [res.total];
+      return [];
+  };
 
   const createNewSession = async () => {
-    // Unique ID: Date + timestamp
     const id = `${selectedDate}_${Date.now()}`;
     const newSession: Session = {
       id,
@@ -72,47 +61,79 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
     setSelectedSessionId(id);
   };
 
-  const handleSaveRow = async (studentId: string) => {
+  const handleAddPassage = async (studentId: string) => {
     if (!currentSession) return;
-    const vals = editValues[studentId];
+    const vals = newPassageValues[studentId];
     if (!vals) return;
 
     const m = parseInt(vals.m) || 0;
     const s = parseInt(vals.s) || 0;
-    const total = (m * 60) + s;
+    
+    // Logic: Add new passage to list, then reset inputs to 0 for the next one
+    const duration = (m * 60) + s;
+    const currentResult = currentSession.results[studentId];
+    
+    const currentPassages = getPassages(currentResult);
+    const newPassages = [...currentPassages, duration];
+    const newTotal = newPassages.reduce((a, b) => a + b, 0);
 
     const updatedSession = {
       ...currentSession,
       results: {
         ...currentSession.results,
-        [studentId]: { total }
+        [studentId]: {
+            total: newTotal,
+            passages: newPassages
+        }
       }
     };
 
-    await storageService.saveSession(updatedSession);
-    onSessionUpdate(updatedSession); // Notify parent if it's the live session being edited
+    await saveAndUpdate(updatedSession);
     
-    // UI Feedback
-    setJustSaved(prev => ({ ...prev, [studentId]: true }));
-    setTimeout(() => setJustSaved(prev => ({ ...prev, [studentId]: false })), 1500);
-    
-    // Refresh local list just in case
-    const updatedSessions = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
-    setSessions(updatedSessions);
+    // RESET TO ZERO/EMPTY: Clear inputs immediately so user can type next value
+    setNewPassageValues(prev => ({
+        ...prev,
+        [studentId]: { m: '', s: '' }
+    }));
   };
 
-  const handleDeleteRow = async (studentId: string) => {
+  const handleDeletePassage = async (studentId: string, index: number) => {
+    if (!currentSession) return;
+    const currentResult = currentSession.results[studentId];
+    const currentPassages = getPassages(currentResult);
+    
+    const newPassages = [...currentPassages];
+    newPassages.splice(index, 1);
+    const newTotal = newPassages.reduce((a, b) => a + b, 0);
+
+    const updatedSession = {
+      ...currentSession,
+      results: {
+        ...currentSession.results,
+        [studentId]: {
+            total: newTotal,
+            passages: newPassages
+        }
+      }
+    };
+    
+    await saveAndUpdate(updatedSession);
+  };
+
+  const handleDeleteStudent = async (studentId: string) => {
     if (!currentSession || !window.confirm("Retirer cet élève de la session ?")) return;
     
     const newResults = { ...currentSession.results };
     delete newResults[studentId];
     
     const updatedSession = { ...currentSession, results: newResults };
-    await storageService.saveSession(updatedSession);
-    onSessionUpdate(updatedSession);
-    
-    const updatedSessions = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
-    setSessions(updatedSessions);
+    await saveAndUpdate(updatedSession);
+  };
+
+  const saveAndUpdate = async (session: Session) => {
+      await storageService.saveSession(session);
+      onSessionUpdate(session);
+      setSessions(prev => prev.map(s => s.id === session.id ? session : s));
   };
 
   const openAddModal = () => {
@@ -125,23 +146,25 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
     
     const newResults = { ...currentSession.results };
     tempSelected.forEach(id => {
-      if (!newResults[id]) newResults[id] = { total: 0 };
+      if (!newResults[id]) newResults[id] = { total: 0, passages: [] };
     });
 
     const updatedSession = { ...currentSession, results: newResults };
-    await storageService.saveSession(updatedSession);
-    onSessionUpdate(updatedSession);
-    
-    const updatedSessions = sessions.map(s => s.id === updatedSession.id ? updatedSession : s);
-    setSessions(updatedSessions);
+    await saveAndUpdate(updatedSession);
     setIsAddModalOpen(false);
   };
 
   const handleInputChange = (studentId: string, field: 'm' | 's', value: string) => {
-    setEditValues(prev => ({
+    setNewPassageValues(prev => ({
       ...prev,
-      [studentId]: { ...prev[studentId], [field]: value }
+      [studentId]: { ...(prev[studentId] || {m:'', s:''}), [field]: value }
     }));
+  };
+
+  const formatTime = (seconds: number) => {
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
   return (
@@ -172,7 +195,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
               onClick={() => setSelectedSessionId(s.id)}
               className={`px-4 py-2 rounded-full text-sm font-medium transition whitespace-nowrap border ${
                 selectedSessionId === s.id 
-                  ? 'bg-indigo-600 text-white border-indigo-600 shadow-md' 
+                  ? 'bg-indigo-300 text-white border-indigo-300 shadow-md' 
                   : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50'
               }`}
             >
@@ -181,7 +204,7 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
           ))}
           <button 
             onClick={createNewSession}
-            className="px-3 py-2 rounded-full text-sm font-bold text-indigo-600 hover:bg-indigo-50 border border-dashed border-indigo-300 transition whitespace-nowrap flex items-center"
+            className="px-3 py-2 rounded-full text-sm font-bold text-indigo-400 hover:bg-indigo-50 border border-dashed border-indigo-300 transition whitespace-nowrap flex items-center"
             title="Nouvelle Session"
           >
             <PlusCircle size={16} />
@@ -200,65 +223,96 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
               <Button onClick={createNewSession}>Créer une session</Button>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-6">
               {Object.keys(currentSession.results).length === 0 ? (
                 <div className="text-center py-8 text-gray-400">Cette session est vide.</div>
               ) : (
                 Object.keys(currentSession.results).map(studentId => {
                   const student = students.find(s => s.id === studentId);
-                  if (!student || !editValues[studentId]) return null;
+                  if (!student) return null;
+                  
+                  const result = currentSession.results[studentId];
+                  const passages = getPassages(result);
+                  const inputs = newPassageValues[studentId] || { m: '', s: '' };
 
                   return (
-                    <div key={studentId} className="bg-white p-4 rounded-lg shadow-sm border border-gray-200 flex flex-col sm:flex-row items-center justify-between gap-4">
-                      <div className="flex-1 w-full sm:w-auto text-left">
-                        <label className="block text-xs font-bold text-gray-400 uppercase tracking-wider">Élève</label>
-                        <div className="font-bold text-lg text-gray-800">{student.name}</div>
-                      </div>
+                    <div key={studentId} className="bg-white p-5 rounded-xl shadow-sm border border-gray-200 flex flex-col md:flex-row items-center justify-between gap-6">
                       
-                      <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
-                        <div className="flex items-end gap-2 bg-gray-50 p-2 rounded-lg border border-gray-100">
-                          <div>
-                            <label className="text-[10px] text-gray-400 uppercase block text-center">Min</label>
-                            <input 
-                              type="number" 
-                              min="0"
-                              className="w-16 p-1 border border-gray-300 rounded text-center font-mono font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                              value={editValues[studentId].m}
-                              onChange={(e) => handleInputChange(studentId, 'm', e.target.value)}
-                            />
+                      {/* Left: Info & List */}
+                      <div className="flex-1 w-full md:w-auto">
+                          <div className="flex items-center gap-2 mb-2">
+                             <div className="font-bold text-lg text-gray-800">
+                                {student.name}
+                             </div>
+                             <span className="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Élève</span>
                           </div>
-                          <span className="mb-2 font-bold text-gray-400">:</span>
-                          <div>
-                            <label className="text-[10px] text-gray-400 uppercase block text-center">Sec</label>
-                            <input 
-                              type="number" 
-                              min="0" max="59"
-                              className="w-16 p-1 border border-gray-300 rounded text-center font-mono font-bold text-lg focus:ring-2 focus:ring-indigo-500 outline-none"
-                              value={editValues[studentId].s}
-                              onChange={(e) => handleInputChange(studentId, 's', e.target.value)}
-                            />
-                          </div>
-                        </div>
 
-                        <div className="flex gap-2">
-                           <button 
-                             onClick={() => handleSaveRow(studentId)}
-                             className={`p-2.5 rounded-lg transition-all shadow-sm ${
-                               justSaved[studentId] 
-                                ? 'bg-green-500 text-white' 
-                                : 'bg-indigo-600 text-white hover:bg-indigo-700'
-                             }`}
-                           >
-                             {justSaved[studentId] ? <Check size={18} /> : <Save size={18} />}
-                           </button>
-                           <button 
-                             onClick={() => handleDeleteRow(studentId)}
-                             className="p-2.5 rounded-lg text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors"
-                           >
-                             <Trash2 size={18} />
-                           </button>
-                        </div>
+                          <div className="flex flex-wrap gap-2">
+                            {passages.length === 0 && <span className="text-sm text-gray-400 italic">Aucun temps</span>}
+                            {passages.map((p, idx) => (
+                               <div key={idx} className="group relative bg-gray-50 text-gray-700 px-3 py-1 rounded-md font-mono text-sm font-medium flex items-center border border-gray-100 hover:border-red-200 transition-all cursor-default">
+                                   {formatTime(p)}
+                                   <button 
+                                     onClick={() => handleDeletePassage(studentId, idx)}
+                                     className="absolute -top-1.5 -right-1.5 bg-white text-red-500 rounded-full border border-gray-200 shadow-sm p-0.5 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-50"
+                                     title="Supprimer ce passage"
+                                   >
+                                      <X size={10} />
+                                   </button>
+                               </div>
+                            ))}
+                            {passages.length > 0 && (
+                                <div className="flex items-center gap-1.5 ml-1 px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md">
+                                    <Clock size={12} />
+                                    <span className="font-mono text-xs font-bold">{formatTime(result.total)}</span>
+                                </div>
+                            )}
+                          </div>
                       </div>
+
+                      {/* Right: Inputs (Matches Screenshot) */}
+                      <div className="flex items-end gap-2 w-full md:w-auto justify-end">
+                         <div className="flex flex-col items-center">
+                            <label className="text-[10px] text-gray-300 font-bold uppercase tracking-wider mb-1">Min</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                className="w-14 h-10 border border-gray-200 rounded-lg text-center font-bold text-gray-700 focus:ring-2 focus:ring-indigo-300 outline-none transition-all placeholder-gray-200"
+                                placeholder="0"
+                                value={inputs.m}
+                                onChange={(e) => handleInputChange(studentId, 'm', e.target.value)}
+                            />
+                         </div>
+                         <div className="h-10 flex items-center pb-1 text-gray-300 font-bold">:</div>
+                         <div className="flex flex-col items-center">
+                            <label className="text-[10px] text-gray-300 font-bold uppercase tracking-wider mb-1">Sec</label>
+                            <input 
+                                type="number" 
+                                min="0" 
+                                max="59" 
+                                className="w-14 h-10 border border-gray-200 rounded-lg text-center font-bold text-gray-700 focus:ring-2 focus:ring-indigo-300 outline-none transition-all placeholder-gray-200"
+                                placeholder="0"
+                                value={inputs.s}
+                                onChange={(e) => handleInputChange(studentId, 's', e.target.value)}
+                            />
+                         </div>
+                         <button 
+                            onClick={() => handleAddPassage(studentId)}
+                            className="h-10 w-10 bg-indigo-400 hover:bg-indigo-500 text-white rounded-lg flex items-center justify-center transition-colors shadow-sm ml-1"
+                            title="Sauvegarder et ajouter (Entrée)"
+                            disabled={(!inputs.m && !inputs.s) || (inputs.m === '0' && inputs.s === '0')}
+                         >
+                            <Save size={20} />
+                         </button>
+                         <button 
+                            onClick={() => handleDeleteStudent(studentId)}
+                            className="h-10 w-10 text-gray-300 hover:text-red-400 flex items-center justify-center transition-colors ml-1"
+                            title="Supprimer l'élève de la session"
+                         >
+                            <Trash2 size={18} />
+                         </button>
+                      </div>
+
                     </div>
                   );
                 })

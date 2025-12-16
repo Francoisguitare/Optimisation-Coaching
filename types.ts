@@ -5,7 +5,8 @@ export interface Student {
 }
 
 export interface SessionResult {
-  total: number; // in seconds
+  total: number; // in seconds (cumulative sum of passages)
+  passages?: number[]; // Array of individual durations in seconds
 }
 
 export interface Session {

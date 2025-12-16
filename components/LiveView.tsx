@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { Play, Pause, Plus, Ghost, StepForward, History } from 'lucide-react';
 import { Session, Student } from '../types';
 import { storageService } from '../services/storageService';
@@ -22,6 +22,11 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
     const interval = setInterval(() => setNow(new Date()), 60000);
     return () => clearInterval(interval);
   }, []);
+
+  // Sort students alphabetically
+  const sortedStudents = useMemo(() => {
+    return [...students].sort((a, b) => a.name.localeCompare(b.name));
+  }, [students]);
 
   // Timer Logic - Robust against background throttling
   useEffect(() => {
@@ -149,38 +154,37 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
       {/* Stats Header */}
-      <div className="bg-white border-b border-gray-100 p-4 grid grid-cols-2 md:grid-cols-3 gap-4 shadow-sm z-10 sticky top-0">
+      <div className="bg-white border-b border-gray-100 p-2 sm:p-3 grid grid-cols-2 md:grid-cols-3 gap-2 shadow-sm z-10 sticky top-0">
         <div className="text-center border-r border-gray-100">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Total Session</p>
-          <p className="text-2xl font-bold text-indigo-600 font-mono mt-1">{formatTime(totalSessionTime)}</p>
+          <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Total</p>
+          <p className="text-xl font-bold text-indigo-600 font-mono">{formatTime(totalSessionTime)}</p>
         </div>
         <div className="text-center md:border-r border-gray-100">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Moyenne</p>
-          <p className="text-2xl font-bold text-gray-700 font-mono mt-1">{formatTime(averageTime)}</p>
+          <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Moyenne</p>
+          <p className="text-xl font-bold text-gray-700 font-mono">{formatTime(averageTime)}</p>
         </div>
         <div className="hidden md:block text-center">
-          <p className="text-xs text-gray-400 uppercase font-bold tracking-wider">Date</p>
-          <p className="text-sm font-medium text-gray-600 mt-2">
+          <p className="text-[10px] text-gray-400 uppercase font-bold tracking-wider">Date</p>
+          <p className="text-xs font-medium text-gray-600">
             {now.toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}
           </p>
         </div>
       </div>
 
       {/* Main List */}
-      <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">
-        <div className="max-w-3xl mx-auto space-y-3">
-          {students.length === 0 ? (
+      <div className="flex-1 overflow-y-auto p-2 bg-gray-50/50">
+        <div className="max-w-3xl mx-auto space-y-2">
+          {sortedStudents.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
               <Ghost size={48} className="mb-4 opacity-20" />
               <p className="text-lg font-medium">Aucun élève dans la classe</p>
               <p className="text-sm">Ajoutez des élèves dans l'onglet "Élèves"</p>
             </div>
           ) : (
-            students.map((student) => {
+            sortedStudents.map((student) => {
               const result = currentSession.results[student.id];
               const isActive = activeStudentId === student.id;
               
-              // Default to 0 if no result exists
               const passages = result?.passages || (result?.total ? [result.total] : []);
               const hasData = passages.length > 0;
               
@@ -191,61 +195,61 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
               return (
                 <div
                   key={student.id}
-                  className={`bg-white p-4 rounded-xl shadow-sm border transition-all duration-300 ${
-                    isActive ? 'border-indigo-400 shadow-indigo-100 ring-1 ring-indigo-50 scale-[1.02]' : 'border-gray-200 hover:border-indigo-200'
-                  } flex flex-col sm:flex-row items-center justify-between gap-4 group`}
+                  className={`bg-white p-2 rounded-lg shadow-sm border transition-all duration-300 ${
+                    isActive ? 'border-indigo-400 shadow-indigo-100 ring-1 ring-indigo-50 scale-[1.01]' : 'border-gray-200 hover:border-indigo-200'
+                  } flex flex-row items-center justify-between gap-3 group min-h-[60px]`}
                 >
                   {/* Left: Info */}
-                  <div className="flex-1 min-w-0 w-full sm:w-auto flex items-center gap-3">
-                     <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
+                  <div className="flex-1 min-w-0 flex items-center gap-2">
+                     <div className={`h-8 w-8 min-w-[2rem] rounded-full flex items-center justify-center font-bold text-xs transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
                         {hasData ? passages.length : '-'}
                      </div>
-                     <div className="flex-1">
-                         <h3 className={`font-bold text-lg truncate ${isActive ? 'text-indigo-900' : 'text-gray-700'}`}>
+                     <div className="flex-1 overflow-hidden">
+                         <h3 className={`font-bold text-base truncate ${isActive ? 'text-indigo-900' : 'text-gray-700'}`}>
                            {student.name}
                          </h3>
-                         <div className="flex items-center gap-2 text-xs text-gray-400 font-medium">
-                            <History size={12} />
+                         <div className="flex items-center gap-2 text-[10px] text-gray-400 font-medium">
+                            <History size={10} />
                             <span>Total: {formatTime(totalTime)}</span>
                             {passages.length > 1 && (
-                                <span>• Dernier: {formatTime(passages[currentPassageIndex - 1] || 0)}</span>
+                                <span className="hidden sm:inline">• Dernier: {formatTime(passages[currentPassageIndex - 1] || 0)}</span>
                             )}
                          </div>
                      </div>
                   </div>
 
                   {/* Right: Controls & Timer */}
-                  <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end">
+                  <div className="flex items-center gap-2 sm:gap-4">
                     
                     {/* Timer Display */}
                     <div className="flex flex-col items-end">
-                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Passage {hasData ? passages.length : 1}</span>
-                        <div className={`font-mono text-3xl font-bold w-28 text-right tabular-nums ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}>
+                        <span className="text-[9px] uppercase font-bold text-gray-400 tracking-wider">Passage {hasData ? passages.length : 1}</span>
+                        <div className={`font-mono text-xl sm:text-2xl font-bold w-20 sm:w-24 text-right tabular-nums ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}>
                           {formatTime(currentPassageTime)}
                         </div>
                     </div>
 
                     {/* Actions */}
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-1.5">
                         {/* New Passage Button */}
                         <button
                           onClick={(e) => startNewPassage(e, student.id)}
-                          className="h-10 w-10 rounded-lg flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200 transition-all active:scale-95"
-                          title="Nouveau Passage (sauvegarder et redémarrer)"
+                          className="h-8 w-8 rounded-lg flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200 transition-all active:scale-95"
+                          title="Nouveau Passage"
                         >
-                          <StepForward size={18} />
+                          <StepForward size={16} />
                         </button>
 
                         {/* Play/Pause */}
                         <button
                           onClick={() => toggleTimer(student.id)}
-                          className={`h-12 w-12 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
+                          className={`h-9 w-9 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                             isActive 
                               ? 'bg-indigo-600 text-white ring-indigo-300' 
                               : 'bg-white text-gray-700 hover:bg-gray-50 ring-gray-200 border border-gray-100'
                           }`}
                         >
-                          {isActive ? <Pause className="fill-current" size={20} /> : <Play className="fill-current ml-1" size={20} />}
+                          {isActive ? <Pause className="fill-current" size={16} /> : <Play className="fill-current ml-0.5" size={16} />}
                         </button>
                     </div>
                   </div>
@@ -257,10 +261,10 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
       </div>
       
       {/* Simple Footer */}
-      <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-20">
-        <div className="max-w-3xl mx-auto flex justify-between items-center text-sm text-gray-500 font-medium">
-          <span>{students.length} élèves dans la classe</span>
-          <span>{participatingStudentIds.length} actifs aujourd'hui</span>
+      <div className="bg-white border-t border-gray-200 p-3 shadow-lg z-20">
+        <div className="max-w-3xl mx-auto flex justify-between items-center text-xs text-gray-500 font-medium">
+          <span>{sortedStudents.length} élèves</span>
+          <span>{participatingStudentIds.length} actifs</span>
         </div>
       </div>
 

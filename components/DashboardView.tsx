@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { DashboardFilter, Session, Student } from '../types';
+import { DashboardFilter, Session, Student, SessionResult } from '../types';
 import { storageService } from '../services/storageService';
 import { Clock, TrendingUp, Trophy } from 'lucide-react';
 
@@ -41,7 +41,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
     const agg: Record<string, number> = {};
     filteredSessions.forEach(session => {
       Object.entries(session.results).forEach(([studentId, result]) => {
-        agg[studentId] = (agg[studentId] || 0) + result.total;
+        // Cast result to SessionResult to avoid "unknown" type error
+        const res = result as SessionResult;
+        agg[studentId] = (agg[studentId] || 0) + res.total;
       });
     });
 

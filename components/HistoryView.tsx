@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Session, Student } from '../types';
+import { Session, Student, SessionResult } from '../types';
 import { storageService } from '../services/storageService';
 import { Button } from './ui/Button';
 import { Modal } from './ui/Modal';
@@ -50,8 +50,9 @@ export const HistoryView: React.FC<HistoryViewProps> = ({ students, onSessionUpd
     if (currentSession) {
       const vals: Record<string, {m: string, s: string}> = {};
       Object.entries(currentSession.results).forEach(([id, res]) => {
-        const m = Math.floor(res.total / 60);
-        const s = res.total % 60;
+        const r = res as SessionResult;
+        const m = Math.floor(r.total / 60);
+        const s = r.total % 60;
         vals[id] = { m: m.toString(), s: s.toString() };
       });
       setEditValues(vals);

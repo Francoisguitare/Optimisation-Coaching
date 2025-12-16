@@ -3,7 +3,6 @@ import { Play, Pause, Plus, Ghost, StepForward, History } from 'lucide-react';
 import { Session, Student } from '../types';
 import { storageService } from '../services/storageService';
 import { Button } from './ui/Button';
-import { Modal } from './ui/Modal';
 
 interface LiveViewProps {
   currentSession: Session;
@@ -13,8 +12,6 @@ interface LiveViewProps {
 
 export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, onSessionUpdate }) => {
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
-  const [isModalOpen, setIsModalOpen] = useState(false);
-  const [tempSelectedStudents, setTempSelectedStudents] = useState<Set<string>>(new Set());
   
   const timerRef = useRef<number | null>(null);
   const lastTickRef = useRef<number | null>(null);
@@ -29,18 +26,14 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
   // Timer Logic - Robust against background throttling
   useEffect(() => {
     if (activeStudentId) {
-      // Initialize the last tick timestamp immediately when starting
       if (!lastTickRef.current) {
         lastTickRef.current = Date.now();
       }
 
       timerRef.current = window.setInterval(() => {
         const currentTime = Date.now();
-        // Calculate how much time passed since the last tick (in ms)
-        // If the browser tab was hidden, this diff might be large (e.g., 5000ms)
         const diff = currentTime - (lastTickRef.current || currentTime);
 
-        // Only update if at least 1 second (1000ms) has passed
         if (diff >= 1000) {
             const secondsPassed = Math.floor(diff / 1000);
             const remainder = diff % 1000;
@@ -57,7 +50,6 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
                 }
             }
 
-            // Add the EXACT elapsed real-world time to the current passage
             newPassages[newPassages.length - 1] = newPassages[newPassages.length - 1] + secondsPassed;
 
             onSessionUpdate({
@@ -71,11 +63,9 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
               }
             });
 
-            // Advance the lastTick by the exact seconds we consumed, keeping the remainder
-            // This prevents drift over time
             lastTickRef.current = currentTime - remainder;
         }
-      }, 200); // Check more frequently (5 times a second) to catch updates quickly
+      }, 200);
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
@@ -120,7 +110,6 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
       setActiveStudentId(null);
       lastTickRef.current = null;
     } else {
-      // Reset the tick reference when starting a new timer
       lastTickRef.current = Date.now();
       setActiveStudentId(id);
     }
@@ -146,45 +135,16 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
     });
   };
 
-  const handleOpenModal = () => {
-    const currentIds = Object.keys(currentSession.results);
-    setTempSelectedStudents(new Set(currentIds));
-    setIsModalOpen(true);
-  };
-
-  const toggleStudentSelection = (id: string) => {
-    const next = new Set(tempSelectedStudents);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setTempSelectedStudents(next);
-  };
-
-  const confirmStudentSelection = () => {
-    const newResults = { ...currentSession.results };
-    
-    tempSelectedStudents.forEach(id => {
-      if (!newResults[id]) newResults[id] = { total: 0, passages: [0] };
-    });
-
-    Object.keys(newResults).forEach(id => {
-      if (!tempSelectedStudents.has(id) && newResults[id].total === 0) {
-        delete newResults[id];
-      }
-    });
-
-    onSessionUpdate({ ...currentSession, results: newResults });
-    setIsModalOpen(false);
-  };
-
   const formatTime = (seconds: number) => {
     const m = Math.floor(seconds / 60);
     const s = seconds % 60;
     return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
-  const activeParticipantIds = Object.keys(currentSession.results);
-  const totalSessionTime = activeParticipantIds.reduce((acc, id) => acc + (currentSession.results[id]?.total || 0), 0);
-  const averageTime = activeParticipantIds.length ? Math.floor(totalSessionTime / activeParticipantIds.length) : 0;
+  // Calculate stats based on students who actually have data
+  const participatingStudentIds = Object.keys(currentSession.results).filter(id => currentSession.results[id].total > 0);
+  const totalSessionTime = participatingStudentIds.reduce((acc, id) => acc + (currentSession.results[id]?.total || 0), 0);
+  const averageTime = participatingStudentIds.length ? Math.floor(totalSessionTime / participatingStudentIds.length) : 0;
 
   return (
     <div className="flex flex-col h-full animate-in fade-in duration-300">
@@ -209,27 +169,28 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
       {/* Main List */}
       <div className="flex-1 overflow-y-auto p-4 bg-gray-50/50">
         <div className="max-w-3xl mx-auto space-y-3">
-          {activeParticipantIds.length === 0 ? (
+          {students.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-20 text-gray-400">
               <Ghost size={48} className="mb-4 opacity-20" />
-              <p className="text-lg font-medium">Aucun participant actif</p>
-              <p className="text-sm">Cliquez sur "Sélectionner" pour commencer</p>
+              <p className="text-lg font-medium">Aucun élève dans la classe</p>
+              <p className="text-sm">Ajoutez des élèves dans l'onglet "Élèves"</p>
             </div>
           ) : (
-            activeParticipantIds.map((id) => {
-              const student = students.find((s) => s.id === id);
-              if (!student) return null;
+            students.map((student) => {
+              const result = currentSession.results[student.id];
+              const isActive = activeStudentId === student.id;
               
-              const result = currentSession.results[id];
-              const isActive = activeStudentId === id;
-              const passages = result.passages || (result.total > 0 ? [result.total] : [0]);
-              const currentPassageIndex = passages.length - 1;
-              const currentPassageTime = passages[currentPassageIndex];
-              const totalTime = result.total;
+              // Default to 0 if no result exists
+              const passages = result?.passages || (result?.total ? [result.total] : []);
+              const hasData = passages.length > 0;
+              
+              const currentPassageIndex = Math.max(0, passages.length - 1);
+              const currentPassageTime = passages[currentPassageIndex] || 0;
+              const totalTime = result?.total || 0;
 
               return (
                 <div
-                  key={id}
+                  key={student.id}
                   className={`bg-white p-4 rounded-xl shadow-sm border transition-all duration-300 ${
                     isActive ? 'border-indigo-400 shadow-indigo-100 ring-1 ring-indigo-50 scale-[1.02]' : 'border-gray-200 hover:border-indigo-200'
                   } flex flex-col sm:flex-row items-center justify-between gap-4 group`}
@@ -237,7 +198,7 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
                   {/* Left: Info */}
                   <div className="flex-1 min-w-0 w-full sm:w-auto flex items-center gap-3">
                      <div className={`h-10 w-10 rounded-full flex items-center justify-center font-bold text-sm transition-colors ${isActive ? 'bg-indigo-600 text-white' : 'bg-indigo-50 text-indigo-600'}`}>
-                        {passages.length}
+                        {hasData ? passages.length : '-'}
                      </div>
                      <div className="flex-1">
                          <h3 className={`font-bold text-lg truncate ${isActive ? 'text-indigo-900' : 'text-gray-700'}`}>
@@ -258,7 +219,7 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
                     
                     {/* Timer Display */}
                     <div className="flex flex-col items-end">
-                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Passage {passages.length}</span>
+                        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Passage {hasData ? passages.length : 1}</span>
                         <div className={`font-mono text-3xl font-bold w-28 text-right tabular-nums ${isActive ? 'text-indigo-600' : 'text-gray-400'}`}>
                           {formatTime(currentPassageTime)}
                         </div>
@@ -268,7 +229,7 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
                     <div className="flex items-center gap-2">
                         {/* New Passage Button */}
                         <button
-                          onClick={(e) => startNewPassage(e, id)}
+                          onClick={(e) => startNewPassage(e, student.id)}
                           className="h-10 w-10 rounded-lg flex items-center justify-center bg-gray-50 text-gray-500 hover:bg-indigo-50 hover:text-indigo-600 border border-gray-200 hover:border-indigo-200 transition-all active:scale-95"
                           title="Nouveau Passage (sauvegarder et redémarrer)"
                         >
@@ -277,7 +238,7 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
 
                         {/* Play/Pause */}
                         <button
-                          onClick={() => toggleTimer(id)}
+                          onClick={() => toggleTimer(student.id)}
                           className={`h-12 w-12 rounded-full flex items-center justify-center shadow-md transition-all active:scale-95 focus:outline-none focus:ring-2 focus:ring-offset-2 ${
                             isActive 
                               ? 'bg-indigo-600 text-white ring-indigo-300' 
@@ -294,55 +255,15 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
           )}
         </div>
       </div>
-
-      {/* Footer Controls */}
+      
+      {/* Simple Footer */}
       <div className="bg-white border-t border-gray-200 p-4 shadow-lg z-20">
-        <div className="max-w-3xl mx-auto flex justify-between items-center">
-          <div className="text-sm text-gray-500 font-medium">
-            <span className="text-indigo-600 font-bold">{activeParticipantIds.length}</span> participants
-          </div>
-          <Button onClick={handleOpenModal} className="rounded-full shadow-indigo-200 shadow-lg">
-            <Plus size={18} className="mr-2" />
-            Sélectionner
-          </Button>
+        <div className="max-w-3xl mx-auto flex justify-between items-center text-sm text-gray-500 font-medium">
+          <span>{students.length} élèves dans la classe</span>
+          <span>{participatingStudentIds.length} actifs aujourd'hui</span>
         </div>
       </div>
 
-      {/* Selection Modal */}
-      <Modal isOpen={isModalOpen} onClose={() => setIsModalOpen(false)} title="Gérer les participants">
-        <div className="space-y-2 mb-6">
-          {students.length === 0 ? (
-            <p className="text-center text-gray-500 py-4">Aucun élève enregistré.</p>
-          ) : (
-            students.map(student => {
-              const isSelected = tempSelectedStudents.has(student.id);
-              return (
-                <label 
-                  key={student.id} 
-                  className={`flex items-center space-x-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-                    isSelected ? 'bg-indigo-50 border-indigo-200' : 'bg-white border-gray-100 hover:bg-gray-50'
-                  }`}
-                >
-                  <input 
-                    type="checkbox" 
-                    className="h-5 w-5 text-indigo-600 rounded focus:ring-indigo-500 border-gray-300"
-                    checked={isSelected}
-                    onChange={() => toggleStudentSelection(student.id)}
-                  />
-                  <span className={`font-medium ${isSelected ? 'text-indigo-900' : 'text-gray-700'}`}>
-                    {student.name}
-                  </span>
-                </label>
-              );
-            })
-          )}
-        </div>
-        <div className="pt-4 border-t border-gray-100">
-          <Button onClick={confirmStudentSelection} className="w-full py-3 text-lg">
-            Valider la sélection
-          </Button>
-        </div>
-      </Modal>
     </div>
   );
 };

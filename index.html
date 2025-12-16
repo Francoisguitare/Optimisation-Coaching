@@ -14,13 +14,13 @@
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <!-- Dependencies for Recharts UMD -->
-    <script crossorigin src="https://unpkg.com/prop-types/prop-types.min.js"></script>
+    <script crossorigin src="https://unpkg.com/prop-types@15.8.1/prop-types.min.js"></script>
     
-    <!-- React & ReactDOM -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.development.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <!-- React & ReactDOM (UMD) -->
+    <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.development.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.development.js"></script>
     
-    <!-- Recharts -->
+    <!-- Recharts (UMD) - Specific version known to work with UMD -->
     <script crossorigin src="https://unpkg.com/recharts@2.10.3/umd/Recharts.min.js"></script>
     
     <!-- Babel for JSX -->
@@ -50,17 +50,20 @@
     <div id="root"></div>
 
     <script type="text/babel">
+        // --- 1. GLOBALS & SETUP ---
+        // Access libraries from the global window object (UMD style)
         const { useState, useEffect, useRef, useMemo, useCallback } = React;
+        const { createRoot } = ReactDOM;
         
         // Safety check for Recharts
         const Recharts = window.Recharts || {};
         const { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } = Recharts;
 
-        if (!BarChart) {
-            console.error("Recharts failed to load. Please check your internet connection.");
+        if (!window.Recharts) {
+            console.warn("Recharts library failed to load. Charts will not display.");
         }
 
-        // --- ICONS (Inline to ensure offline/file:// compatibility) ---
+        // --- 2. ICONS (Inline Replacement for lucide-react) ---
         const IconBase = ({ children, size = 24, className = "", ...props }) => (
             <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
         );
@@ -87,7 +90,7 @@
             Users: (props) => <IconBase {...props}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></IconBase>
         };
 
-        // --- SERVICES ---
+        // --- 3. SERVICES ---
         const STORAGE_KEYS = { STUDENTS: 'chrono_track_students', SESSIONS: 'chrono_track_sessions' };
         const delay = (ms) => new Promise(resolve => setTimeout(resolve, ms));
         
@@ -134,7 +137,7 @@
             }
         };
 
-        // --- COMPONENTS ---
+        // --- 4. COMPONENTS ---
 
         const Button = ({ children, variant = 'primary', size = 'md', className = '', ...props }) => {
             const baseStyles = "inline-flex items-center justify-center font-medium rounded-lg transition-all focus:outline-none focus:ring-2 focus:ring-offset-1 disabled:opacity-50 disabled:cursor-not-allowed";
@@ -673,7 +676,7 @@
             );
         };
 
-        const root = ReactDOM.createRoot(document.getElementById('root'));
+        const root = createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
 </body>

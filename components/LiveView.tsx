@@ -15,7 +15,9 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
   const [activeStudentId, setActiveStudentId] = useState<string | null>(null);
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [tempSelectedStudents, setTempSelectedStudents] = useState<Set<string>>(new Set());
+  
   const timerRef = useRef<number | null>(null);
+  const lastTickRef = useRef<number | null>(null);
   const [now, setNow] = useState(new Date());
 
   // Clock for the header
@@ -24,45 +26,62 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
     return () => clearInterval(interval);
   }, []);
 
-  // Timer Logic
+  // Timer Logic - Robust against background throttling
   useEffect(() => {
     if (activeStudentId) {
+      // Initialize the last tick timestamp immediately when starting
+      if (!lastTickRef.current) {
+        lastTickRef.current = Date.now();
+      }
+
       timerRef.current = window.setInterval(() => {
-        const currentResult = currentSession.results[activeStudentId];
-        const currentPassages = currentResult?.passages || [];
-        
-        // Ensure there is at least one passage to increment
-        let newPassages = [...currentPassages];
-        if (newPassages.length === 0) {
-            // If migrating from old data format (only total), treat current total as first passage
-            // OR start fresh. Let's start fresh logic for safety, but try to respect total.
-            // Better: if total > 0 but passages empty, push total.
-            if ((currentResult?.total || 0) > 0) {
-                newPassages = [currentResult.total];
-            } else {
-                newPassages = [0];
+        const currentTime = Date.now();
+        // Calculate how much time passed since the last tick (in ms)
+        // If the browser tab was hidden, this diff might be large (e.g., 5000ms)
+        const diff = currentTime - (lastTickRef.current || currentTime);
+
+        // Only update if at least 1 second (1000ms) has passed
+        if (diff >= 1000) {
+            const secondsPassed = Math.floor(diff / 1000);
+            const remainder = diff % 1000;
+
+            const currentResult = currentSession.results[activeStudentId];
+            const currentPassages = currentResult?.passages || [];
+            
+            let newPassages = [...currentPassages];
+            if (newPassages.length === 0) {
+                if ((currentResult?.total || 0) > 0) {
+                    newPassages = [currentResult.total];
+                } else {
+                    newPassages = [0];
+                }
             }
+
+            // Add the EXACT elapsed real-world time to the current passage
+            newPassages[newPassages.length - 1] = newPassages[newPassages.length - 1] + secondsPassed;
+
+            onSessionUpdate({
+              ...currentSession,
+              results: {
+                ...currentSession.results,
+                [activeStudentId]: {
+                  total: (currentResult?.total || 0) + secondsPassed,
+                  passages: newPassages
+                }
+              }
+            });
+
+            // Advance the lastTick by the exact seconds we consumed, keeping the remainder
+            // This prevents drift over time
+            lastTickRef.current = currentTime - remainder;
         }
-
-        // Increment the last passage
-        newPassages[newPassages.length - 1] = newPassages[newPassages.length - 1] + 1;
-
-        onSessionUpdate({
-          ...currentSession,
-          results: {
-            ...currentSession.results,
-            [activeStudentId]: {
-              total: (currentResult?.total || 0) + 1,
-              passages: newPassages
-            }
-          }
-        });
-      }, 1000);
+      }, 200); // Check more frequently (5 times a second) to catch updates quickly
     } else {
       if (timerRef.current) {
         clearInterval(timerRef.current);
         timerRef.current = null;
       }
+      lastTickRef.current = null;
     }
 
     return () => {
@@ -80,10 +99,8 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
   }, [currentSession]);
 
   const toggleTimer = (id: string) => {
-    // Determine if we need to initialize passages for this student
     const result = currentSession.results[id];
     if (!result || !result.passages || result.passages.length === 0) {
-       // Initialize structure if needed immediately
        const initialTotal = result?.total || 0;
        const initialPassages = result?.passages || (initialTotal > 0 ? [initialTotal] : [0]);
        
@@ -101,21 +118,21 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
 
     if (activeStudentId === id) {
       setActiveStudentId(null);
+      lastTickRef.current = null;
     } else {
+      // Reset the tick reference when starting a new timer
+      lastTickRef.current = Date.now();
       setActiveStudentId(id);
     }
   };
 
   const startNewPassage = (e: React.MouseEvent, id: string) => {
-    e.stopPropagation(); // Prevent toggling the timer
+    e.stopPropagation(); 
     
     const result = currentSession.results[id];
     if (!result) return;
 
     const currentPassages = result.passages || (result.total > 0 ? [result.total] : [0]);
-    
-    // Only add a new passage if the current one has some time, otherwise just reset the 0?
-    // User wants "record a 2nd one".
     
     onSessionUpdate({
       ...currentSession,
@@ -123,14 +140,10 @@ export const LiveView: React.FC<LiveViewProps> = ({ currentSession, students, on
         ...currentSession.results,
         [id]: {
           ...result,
-          passages: [...currentPassages, 0] // Add a new 0-second passage at the end
+          passages: [...currentPassages, 0] 
         }
       }
     });
-    
-    // If not active, make it active to start timing immediately? 
-    // Or just prep it. Let's keep the current active state. 
-    // If it was running, it keeps running on the new passage.
   };
 
   const handleOpenModal = () => {

@@ -47,11 +47,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
     const week = getFilteredStats(7);
     const month = getFilteredStats(30);
 
-    // Goal: 10 hours per week (36000s)
     const weeklyGoal = 36000; 
     const progressValue = Math.min(100, (week.totalSeconds / weeklyGoal) * 100);
     
-    // Coach Level Logic
     let level = "Coach Espoir";
     let levelColor = "text-blue-500 bg-blue-50 border-blue-100";
     if (month.totalSeconds > 180000) { 
@@ -98,14 +96,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
     <div className="h-full overflow-y-auto bg-slate-50 p-4 md:p-8 animate-in custom-scrollbar">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Header Hero */}
         <div className="flex flex-col md:flex-row gap-6">
           <div className="flex-1 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-8 relative overflow-hidden">
             <div className="absolute top-0 right-0 p-8 opacity-5">
               <Target size={120} className="text-indigo-600" />
             </div>
 
-            {/* Circle Progress */}
             <div className="relative w-36 h-36 shrink-0">
                <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
@@ -123,7 +119,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
                   </PieChart>
                </ResponsiveContainer>
                <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-                  <span className="text-2xl font-black text-slate-800">{Math.round(stats.progress)}%</span>
+                  <span className="text-2xl font-black text-slate-800">{String(Math.round(stats.progress))}%</span>
                   <span className="text-[9px] uppercase font-bold text-slate-400">Objectif</span>
                </div>
             </div>
@@ -137,7 +133,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
               </div>
               <h2 className="text-2xl font-bold text-slate-800 mb-1">Coach Dashboard</h2>
               <div className="text-slate-500 text-sm">
-                Vous avez coaché <span className="font-bold text-indigo-600">{formatHours(stats.week.totalSeconds)}</span> sur <span className="font-bold text-slate-700">{stats.week.activeDays} jours actifs</span> cette semaine.
+                Vous avez coaché <span className="font-bold text-indigo-600">{formatHours(stats.week.totalSeconds)}</span> sur <span className="font-bold text-slate-700">{String(stats.week.activeDays)} jours actifs</span> cette semaine.
               </div>
               
               <div className="mt-5 flex gap-4 justify-center md:justify-start">
@@ -152,12 +148,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
           </div>
 
           <div className="md:w-72 space-y-4">
-             <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-[2rem] text-white shadow-xl shadow-indigo-100">
+             <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-[2rem] text-white shadow-xl">
                 <Calendar size={18} className="text-indigo-200 mb-4" />
                 <h3 className="text-2xl font-black mb-0.5">{formatHours(stats.month.totalSeconds)}</h3>
                 <p className="text-indigo-100/70 text-[10px] uppercase font-bold tracking-widest">Cumul 30 jours</p>
              </div>
-             
              <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
                 <Medal size={18} className="text-yellow-500 mb-4" />
                 <h3 className="text-lg font-bold text-slate-800 truncate mb-0.5">
@@ -212,10 +207,10 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
                ) : (
                  <div className="space-y-1">
                    {stats.tableData.map((s, i) => (
-                     <div key={s.id || i} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors group">
+                     <div key={s.id || String(i)} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors group">
                         <div className="flex items-center gap-3">
                            <span className={`w-5 text-[10px] font-black ${i < 3 ? 'text-indigo-600' : 'text-slate-300'}`}>
-                              {i + 1}
+                              {String(i + 1)}
                            </span>
                            <span className="text-xs font-semibold text-slate-700 truncate max-w-[100px]">
                               {s.name}

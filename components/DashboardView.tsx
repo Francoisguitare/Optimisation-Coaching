@@ -1,15 +1,14 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { DashboardFilter, Session, Student, SessionResult } from '../types';
+import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie } from 'recharts';
+import { Session, Student, SessionResult } from '../types';
 import { storageService } from '../services/storageService';
-import { Clock, TrendingUp, Trophy } from 'lucide-react';
+import { Clock, TrendingUp, Trophy, Calendar, Target, Zap, Medal } from 'lucide-react';
 
 interface DashboardViewProps {
   students: Student[];
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
-  const [filter, setFilter] = useState<DashboardFilter>('daily');
   const [sessions, setSessions] = useState<Session[]>([]);
 
   useEffect(() => {
@@ -18,180 +17,219 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ students }) => {
 
   const stats = useMemo(() => {
     const now = new Date();
-    const todayStr = now.toISOString().split('T')[0];
     
-    // Filter sessions based on time range
-    const filteredSessions = sessions.filter(s => {
-      const sessionDate = s.id.split('_')[0]; // Assuming ID starts with YYYY-MM-DD
+    const getFilteredStats = (days: number) => {
+      const startDate = new Date(now);
+      startDate.setDate(startDate.getDate() - days);
+      const startDateStr = startDate.toISOString().split('T')[0];
+
+      const filtered = sessions.filter(s => s.id.split('_')[0] >= startDateStr);
       
-      if (filter === 'daily') {
-        return sessionDate === todayStr;
-      } else if (filter === 'weekly') {
-        const d = new Date(now);
-        d.setDate(d.getDate() - 7);
-        return sessionDate >= d.toISOString().split('T')[0];
-      } else {
-        const d = new Date(now);
-        d.setMonth(d.getMonth() - 1);
-        return sessionDate >= d.toISOString().split('T')[0];
-      }
-    });
+      const agg: Record<string, number> = {};
+      const activeDates = new Set<string>();
 
-    // Aggregate data per student
-    const agg: Record<string, number> = {};
-    filteredSessions.forEach(session => {
-      Object.entries(session.results).forEach(([studentId, result]) => {
-        // Cast result to SessionResult to avoid "unknown" type error
-        const res = result as SessionResult;
-        agg[studentId] = (agg[studentId] || 0) + res.total;
+      filtered.forEach(session => {
+        let sessionHasData = false;
+        Object.entries(session.results).forEach(([studentId, result]) => {
+          const res = result as SessionResult;
+          if (res.total > 0) {
+            agg[studentId] = (agg[studentId] || 0) + res.total;
+            sessionHasData = true;
+          }
+        });
+        if (sessionHasData) activeDates.add(session.id.split('_')[0]);
       });
-    });
 
-    // Transform to array for chart/table
-    const data = Object.keys(agg).map(id => {
+      const totalSeconds = Object.values(agg).reduce((a, b) => a + b, 0);
+      return { totalSeconds, activeDays: activeDates.size, studentAgg: agg };
+    };
+
+    const week = getFilteredStats(7);
+    const month = getFilteredStats(30);
+
+    // Goal: 10 hours per week (36000s)
+    const weeklyGoal = 36000; 
+    const progressValue = Math.min(100, (week.totalSeconds / weeklyGoal) * 100);
+    
+    // Coach Level Logic
+    let level = "Coach Espoir";
+    let levelColor = "text-blue-500 bg-blue-50 border-blue-100";
+    if (month.totalSeconds > 180000) { 
+      level = "Coach Élite"; 
+      levelColor = "text-purple-600 bg-purple-50 border-purple-100"; 
+    } else if (month.totalSeconds > 90000) { 
+      level = "Coach Expert"; 
+      levelColor = "text-indigo-600 bg-indigo-50 border-indigo-100"; 
+    } else if (month.totalSeconds > 36000) { 
+      level = "Coach Confirmé"; 
+      levelColor = "text-emerald-600 bg-emerald-50 border-emerald-100"; 
+    }
+
+    const tableData = Object.keys(month.studentAgg).map(id => {
       const student = students.find(s => s.id === id);
       return {
         id,
         name: student?.name || 'Inconnu',
-        seconds: agg[id],
-        formattedTime: formatHours(agg[id])
+        seconds: month.studentAgg[id],
       };
     }).sort((a, b) => b.seconds - a.seconds);
 
-    const totalSeconds = data.reduce((acc, curr) => acc + curr.seconds, 0);
-    const averageSeconds = data.length ? Math.floor(totalSeconds / data.length) : 0;
-    const topStudent = data.length > 0 ? data[0] : null;
+    return { week, month, progress: progressValue, level, levelColor, tableData };
+  }, [sessions, students]);
 
-    return { data, totalSeconds, averageSeconds, topStudent };
-  }, [sessions, filter, students]);
-
-  function formatHours(s: number) {
+  const formatHours = (s: number) => {
     const h = Math.floor(s / 3600);
     const m = Math.floor((s % 3600) / 60);
-    if (h > 0) return `${h}h ${m}m`;
-    const sec = s % 60;
-    return `${m}m ${sec}s`;
-  }
+    return h > 0 ? `${h}h ${m}m` : `${m}m ${s % 60}s`;
+  };
 
-  function formatTime(s: number) {
+  const formatTime = (s: number) => {
     const m = Math.floor(s / 60);
     const sec = s % 60;
     return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  }
+  };
+
+  const gaugeData = [
+    { value: stats.progress, fill: '#4F46E5' },
+    { value: 100 - stats.progress, fill: '#F1F5F9' }
+  ];
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-50 p-4 md:p-6 animate-in fade-in slide-in-from-bottom-4 duration-300">
+    <div className="h-full overflow-y-auto bg-slate-50 p-4 md:p-8 animate-in custom-scrollbar">
       <div className="max-w-6xl mx-auto space-y-6">
         
-        {/* Header & Filter */}
-        <div className="flex flex-col md:flex-row justify-between items-center bg-white p-4 rounded-2xl border border-gray-200 shadow-sm gap-4">
-          <h2 className="font-bold text-xl text-gray-800 flex items-center gap-2">
-            <TrendingUp className="text-indigo-600" />
-            Analyses
-          </h2>
-          <div className="flex bg-gray-100 p-1 rounded-xl">
-            {(['daily', 'weekly', 'monthly'] as const).map((f) => (
-              <button
-                key={f}
-                onClick={() => setFilter(f)}
-                className={`px-4 py-2 rounded-lg text-sm font-medium transition-all ${
-                  filter === f 
-                    ? 'bg-white text-indigo-600 shadow-sm' 
-                    : 'text-gray-500 hover:text-gray-700 hover:bg-gray-200/50'
-                }`}
-              >
-                {f === 'daily' ? "Aujourd'hui" : f === 'weekly' ? 'Hebdo' : 'Mensuel'}
-              </button>
-            ))}
+        {/* Header Hero */}
+        <div className="flex flex-col md:flex-row gap-6">
+          <div className="flex-1 bg-white p-6 rounded-[2rem] shadow-sm border border-slate-100 flex flex-col md:flex-row items-center gap-8 relative overflow-hidden">
+            <div className="absolute top-0 right-0 p-8 opacity-5">
+              <Target size={120} className="text-indigo-600" />
+            </div>
+
+            {/* Circle Progress */}
+            <div className="relative w-36 h-36 shrink-0">
+               <ResponsiveContainer width="100%" height="100%">
+                  <PieChart>
+                    <Pie
+                      data={gaugeData}
+                      cx="50%"
+                      cy="50%"
+                      innerRadius={50}
+                      outerRadius={65}
+                      startAngle={225}
+                      endAngle={-45}
+                      dataKey="value"
+                      stroke="none"
+                    />
+                  </PieChart>
+               </ResponsiveContainer>
+               <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
+                  <span className="text-2xl font-black text-slate-800">{Math.round(stats.progress)}%</span>
+                  <span className="text-[9px] uppercase font-bold text-slate-400">Objectif</span>
+               </div>
+            </div>
+
+            <div className="flex-1 text-center md:text-left z-10">
+              <div className="flex items-center justify-center md:justify-start gap-2 mb-3">
+                 <span className={`px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-widest border ${stats.levelColor}`}>
+                    {stats.level}
+                 </span>
+                 <Zap size={14} className="text-yellow-400 fill-current" />
+              </div>
+              <h2 className="text-2xl font-bold text-slate-800 mb-1">Coach Dashboard</h2>
+              <div className="text-slate-500 text-sm">
+                Vous avez coaché <span className="font-bold text-indigo-600">{formatHours(stats.week.totalSeconds)}</span> sur <span className="font-bold text-slate-700">{stats.week.activeDays} jours actifs</span> cette semaine.
+              </div>
+              
+              <div className="mt-5 flex gap-4 justify-center md:justify-start">
+                 <div className="bg-slate-50 px-4 py-2 rounded-xl border border-slate-100">
+                    <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wider">Moyenne / Jour Actif</p>
+                    <div className="text-lg font-mono font-bold text-slate-700">
+                        {stats.week.activeDays > 0 ? formatHours(stats.week.totalSeconds / stats.week.activeDays) : '0s'}
+                    </div>
+                 </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="md:w-72 space-y-4">
+             <div className="bg-gradient-to-br from-indigo-600 to-indigo-800 p-5 rounded-[2rem] text-white shadow-xl shadow-indigo-100">
+                <Calendar size={18} className="text-indigo-200 mb-4" />
+                <h3 className="text-2xl font-black mb-0.5">{formatHours(stats.month.totalSeconds)}</h3>
+                <p className="text-indigo-100/70 text-[10px] uppercase font-bold tracking-widest">Cumul 30 jours</p>
+             </div>
+             
+             <div className="bg-white p-5 rounded-[2rem] border border-slate-100 shadow-sm">
+                <Medal size={18} className="text-yellow-500 mb-4" />
+                <h3 className="text-lg font-bold text-slate-800 truncate mb-0.5">
+                    {stats.tableData[0]?.name || "-"}
+                </h3>
+                <p className="text-slate-400 text-[10px] uppercase font-bold tracking-widest">Top Performance</p>
+             </div>
           </div>
         </div>
 
-        {/* KPI Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="bg-gradient-to-br from-indigo-600 to-indigo-700 text-white p-6 rounded-2xl shadow-xl shadow-indigo-200">
-            <div className="flex justify-between items-start mb-4">
-              <div className="bg-white/20 p-2 rounded-lg"><Clock size={20} /></div>
-              <span className="text-indigo-100 text-xs font-medium uppercase tracking-wider">Total</span>
-            </div>
-            <h3 className="text-4xl font-bold">{formatHours(stats.totalSeconds)}</h3>
-            <p className="text-indigo-200 text-sm mt-1">Temps de parole cumulé</p>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-               <div className="bg-orange-100 text-orange-600 p-2 rounded-lg"><TrendingUp size={20} /></div>
-               <span className="text-gray-400 text-xs font-medium uppercase tracking-wider">Moyenne</span>
-            </div>
-            <h3 className="text-3xl font-bold text-gray-800">{formatTime(stats.averageSeconds)}</h3>
-            <p className="text-gray-500 text-sm mt-1">Par élève actif</p>
-          </div>
-
-          <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-            <div className="flex justify-between items-start mb-4">
-               <div className="bg-yellow-100 text-yellow-600 p-2 rounded-lg"><Trophy size={20} /></div>
-               <span className="text-gray-400 text-xs font-medium uppercase tracking-wider">Top Orateur</span>
-            </div>
-            <h3 className="text-2xl font-bold text-gray-800 truncate" title={stats.topStudent?.name}>
-              {stats.topStudent?.name || '-'}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2 mb-6 text-sm">
+               <TrendingUp size={16} className="text-indigo-600" />
+               Répartition par élève (30j)
             </h3>
-            <p className="text-indigo-500 font-mono font-medium mt-1">
-              {stats.topStudent ? formatTime(stats.topStudent.seconds) : '00:00'}
-            </p>
+            <div className="h-64 w-full">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={stats.tableData.slice(0, 8)}>
+                    <XAxis 
+                      dataKey="name" 
+                      axisLine={false} 
+                      tickLine={false} 
+                      tick={{fill: '#94A3B8', fontSize: 10, fontWeight: 600}} 
+                      dy={10}
+                    />
+                    <Tooltip 
+                      cursor={{fill: '#F8FAFC', radius: 8}}
+                      contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 10px 15px -3px rgb(0 0 0 / 0.1)', fontSize: '12px'}}
+                    />
+                    <Bar dataKey="seconds" radius={[6, 6, 6, 6]} barSize={30}>
+                      {stats.tableData.slice(0, 8).map((entry, index) => (
+                        <Cell key={`cell-${index}`} fill={index === 0 ? '#4F46E5' : '#818CF8'} fillOpacity={1 - (index * 0.1)} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+            </div>
           </div>
-        </div>
 
-        {/* Chart */}
-        <div className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200">
-          <h3 className="text-gray-500 text-sm font-semibold uppercase tracking-wider mb-6">Répartition du temps</h3>
-          <div className="h-64 w-full">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={stats.data.slice(0, 10)}>
-                <XAxis 
-                  dataKey="name" 
-                  axisLine={false} 
-                  tickLine={false} 
-                  tick={{fill: '#9CA3AF', fontSize: 12}} 
-                  dy={10}
-                />
-                <Tooltip 
-                  cursor={{fill: '#F3F4F6'}}
-                  contentStyle={{borderRadius: '12px', border: 'none', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)'}}
-                />
-                <Bar dataKey="seconds" radius={[6, 6, 0, 0]}>
-                  {stats.data.slice(0, 10).map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={index === 0 ? '#4F46E5' : '#818CF8'} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
+          <div className="bg-white rounded-[2rem] border border-slate-100 shadow-sm overflow-hidden flex flex-col">
+            <div className="p-5 border-b border-slate-50 flex items-center justify-between">
+               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
+                  <Trophy size={16} className="text-orange-500" />
+                  Classement
+               </h3>
+               <span className="text-[10px] font-bold text-slate-400">30 JOURS</span>
+            </div>
+            <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
+               {stats.tableData.length === 0 ? (
+                 <div className="text-center py-10 text-slate-300 text-xs">Aucune donnée enregistrée</div>
+               ) : (
+                 <div className="space-y-1">
+                   {stats.tableData.map((s, i) => (
+                     <div key={s.id || i} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-50 transition-colors group">
+                        <div className="flex items-center gap-3">
+                           <span className={`w-5 text-[10px] font-black ${i < 3 ? 'text-indigo-600' : 'text-slate-300'}`}>
+                              {i + 1}
+                           </span>
+                           <span className="text-xs font-semibold text-slate-700 truncate max-w-[100px]">
+                              {s.name}
+                           </span>
+                        </div>
+                        <span className="font-mono text-[10px] font-bold text-slate-400">
+                           {formatTime(s.seconds)}
+                        </span>
+                     </div>
+                   ))}
+                 </div>
+               )}
+            </div>
           </div>
-        </div>
-
-        {/* Table */}
-        <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden">
-          <table className="w-full text-sm text-left">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                <th className="px-6 py-4 font-semibold text-gray-500 uppercase text-xs">Rang</th>
-                <th className="px-6 py-4 font-semibold text-gray-500 uppercase text-xs">Nom de l'élève</th>
-                <th className="px-6 py-4 font-semibold text-gray-500 uppercase text-xs text-right">Temps</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-50">
-              {stats.data.map((s, i) => (
-                <tr key={s.id} className="hover:bg-gray-50/50 transition-colors">
-                  <td className="px-6 py-4 text-gray-400 font-mono w-16">{i + 1}</td>
-                  <td className="px-6 py-4 font-medium text-gray-700">{s.name}</td>
-                  <td className="px-6 py-4 text-right font-mono text-indigo-600 font-bold">{formatTime(s.seconds)}</td>
-                </tr>
-              ))}
-              {stats.data.length === 0 && (
-                <tr>
-                  <td colSpan={3} className="px-6 py-8 text-center text-gray-400">Aucune donnée disponible pour cette période</td>
-                </tr>
-              )}
-            </tbody>
-          </table>
         </div>
       </div>
     </div>

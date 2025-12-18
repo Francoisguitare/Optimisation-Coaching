@@ -8,7 +8,7 @@ import { Session, Student, ViewType } from './types';
 import { storageService } from './services/storageService';
 
 const App: React.FC = () => {
-  const [view, setView] = useState<ViewType>('live');
+  const [view, setView] = useState<ViewType>('dashboard');
   const [students, setStudents] = useState<Student[]>([]);
   const [todaySession, setTodaySession] = useState<Session>({
     id: new Date().toISOString().split('T')[0],
@@ -16,25 +16,16 @@ const App: React.FC = () => {
     results: {}
   });
 
-  // Initialization
   useEffect(() => {
     const init = async () => {
-      // Load Students
       const loadedStudents = await storageService.getStudents();
       setStudents(loadedStudents);
-
-      // Load Today's Session
       const todayId = new Date().toISOString().split('T')[0];
       const existing = await storageService.getSession(todayId);
       if (existing) {
         setTodaySession(existing);
       } else {
-        // Create if not exists
-        const newSession = {
-          id: todayId,
-          date: new Date().toISOString(),
-          results: {}
-        };
+        const newSession = { id: todayId, date: new Date().toISOString(), results: {} };
         await storageService.saveSession(newSession);
         setTodaySession(newSession);
       }
@@ -49,39 +40,21 @@ const App: React.FC = () => {
 
   const handleSessionUpdate = (updated: Session) => {
     setTodaySession(updated);
-    // If we are editing the CURRENT day's session in history, update state too
-    // This is handled automatically if the History component updates the store,
-    // but the state needs to reflect here for the Live view.
   };
 
   return (
     <Layout currentView={view} onViewChange={setView}>
       {view === 'live' && (
-        <LiveView 
-          currentSession={todaySession} 
-          students={students}
-          onSessionUpdate={handleSessionUpdate}
-        />
+        <LiveView currentSession={todaySession} students={students} onSessionUpdate={handleSessionUpdate} />
       )}
       {view === 'dashboard' && (
         <DashboardView students={students} />
       )}
       {view === 'history' && (
-        <HistoryView 
-          students={students} 
-          onSessionUpdate={(s) => {
-            // If the updated session is today's session, update the live state
-            if (s.id === todaySession.id) {
-              setTodaySession(s);
-            }
-          }}
-        />
+        <HistoryView students={students} onSessionUpdate={(s) => { if (s.id === todaySession.id) setTodaySession(s); }} />
       )}
       {view === 'students' && (
-        <StudentsView 
-          students={students}
-          onStudentsChange={handleStudentsChange}
-        />
+        <StudentsView students={students} onStudentsChange={handleStudentsChange} />
       )}
     </Layout>
   );

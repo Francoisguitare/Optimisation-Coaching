@@ -53,17 +53,17 @@
             </div>
         </div>
 
-        <div class="flex bg-slate-100 p-1 rounded-xl gap-1">
+        <div class="flex bg-slate-100 p-1 rounded-xl gap-1 overflow-x-auto no-scrollbar">
             <button onclick="switchView('live')" data-nav="live" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap bg-white text-indigo-600 shadow-sm">
                 <i data-lucide="play" class="w-4 h-4 mr-2"></i>LIVE
             </button>
-            <button onclick="switchView('stats')" data-nav="stats" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50">
+            <button onclick="switchView('stats')" data-nav="stats" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
                 <i data-lucide="bar-chart-3" class="w-4 h-4 mr-2"></i>STATS
             </button>
-            <button onclick="switchView('history')" data-nav="history" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50">
+            <button onclick="switchView('history')" data-nav="history" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
                 <i data-lucide="calendar" class="w-4 h-4 mr-2"></i>HISTO
             </button>
-            <button onclick="switchView('students')" data-nav="students" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50">
+            <button onclick="switchView('students')" data-nav="students" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
                 <i data-lucide="users" class="w-4 h-4 mr-2"></i>ÉLÈVES
             </button>
         </div>
@@ -75,7 +75,7 @@
         <!-- VIEW: LIVE -->
         <div id="view-live" class="view active h-full overflow-y-auto p-4 custom-scrollbar">
             <div class="max-w-2xl mx-auto space-y-3" id="live-container">
-                <!-- Students cards will be injected here -->
+                <!-- Les cartes élèves seront injectées ici -->
             </div>
         </div>
 
@@ -112,7 +112,7 @@
                         RÉPARTITION DU TEMPS (30j)
                     </h3>
                     <div id="chart-container" class="space-y-4">
-                        <!-- Custom bars injected here -->
+                        <!-- Custom bars injectées ici -->
                     </div>
                 </div>
             </div>
@@ -126,12 +126,12 @@
                     <input type="date" id="history-date-picker" class="bg-transparent text-xs font-bold outline-none uppercase">
                 </div>
                 <div id="session-tabs" class="flex gap-2 overflow-x-auto no-scrollbar">
-                    <!-- Session tabs injected here -->
+                    <!-- Session tabs injectées ici -->
                 </div>
             </div>
             <div class="flex-1 overflow-y-auto p-4 custom-scrollbar">
                 <div id="history-list" class="max-w-2xl mx-auto space-y-2">
-                    <!-- History entries injected here -->
+                    <!-- History entries injectées ici -->
                 </div>
             </div>
         </div>
@@ -149,7 +149,7 @@
                     </button>
                 </div>
                 <div id="students-list" class="space-y-2">
-                    <!-- Student list injected here -->
+                    <!-- Student list injectée ici -->
                 </div>
             </div>
         </div>
@@ -164,13 +164,27 @@
             <input type="text" id="new-student-name" placeholder="Ex: Lucas Bernard" class="w-full bg-slate-50 border border-slate-100 rounded-2xl p-4 mb-6 outline-none focus:ring-2 focus:ring-indigo-500 font-bold transition-all">
             <div class="flex gap-3">
                 <button onclick="toggleModal('add-student-modal', false)" class="flex-1 bg-slate-100 text-slate-500 py-4 rounded-2xl font-bold text-sm">Annuler</button>
-                <button onclick="addStudent()" class="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-indigo-100">Créer</button>
+                <button id="btn-create-student" onclick="addStudent()" class="flex-1 bg-indigo-600 text-white py-4 rounded-2xl font-black text-sm shadow-lg shadow-indigo-100">Créer</button>
             </div>
         </div>
     </div>
 
     <!-- APP SCRIPT -->
     <script>
+        // --- MIGRATION DES DONNÉES ---
+        // On récupère les anciennes clés React si les nouvelles sont vides
+        const oldStudents = localStorage.getItem('chrono_track_students');
+        if (oldStudents && !localStorage.getItem('ct_students')) {
+            console.log("Migration des élèves détectée...");
+            localStorage.setItem('ct_students', oldStudents);
+        }
+        
+        const oldSessions = localStorage.getItem('chrono_track_sessions');
+        if (oldSessions && !localStorage.getItem('ct_sessions')) {
+            console.log("Migration des sessions détectée...");
+            localStorage.setItem('ct_sessions', oldSessions);
+        }
+
         // --- DATA & STATE ---
         let state = {
             view: 'live',
@@ -222,13 +236,14 @@
         const switchView = (viewName) => {
             state.view = viewName;
             document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
-            document.getElementById(`view-${viewName}`).classList.add('active');
+            const target = document.getElementById(`view-${viewName}`);
+            if (target) target.classList.add('active');
             
             document.querySelectorAll('.nav-btn').forEach(btn => {
                 if(btn.dataset.nav === viewName) {
-                    btn.className = "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all bg-white text-indigo-600 shadow-sm";
+                    btn.className = "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all bg-white text-indigo-600 shadow-sm whitespace-nowrap";
                 } else {
-                    btn.className = "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50";
+                    btn.className = "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap";
                 }
             });
 
@@ -236,16 +251,31 @@
         };
 
         const toggleModal = (id, show) => {
-            document.getElementById(id).classList.toggle('hidden', !show);
-            if(show) document.getElementById('new-student-name').focus();
+            const modal = document.getElementById(id);
+            if (modal) {
+                modal.classList.toggle('hidden', !show);
+                if(show) {
+                    const input = document.getElementById('new-student-name');
+                    if (input) input.focus();
+                }
+            }
         };
 
         // --- LOGIC ---
         const addStudent = () => {
-            const name = document.getElementById('new-student-name').value.trim();
-            if(!name) return;
-            state.students.push({ id: Date.now().toString(), name, createdAt: new Date().toISOString() });
-            document.getElementById('new-student-name').value = '';
+            const input = document.getElementById('new-student-name');
+            const name = input.value.trim();
+            if(!name) {
+                alert("Veuillez entrer un nom.");
+                return;
+            }
+            const newStudent = { 
+                id: "st_" + Date.now().toString(), 
+                name: name, 
+                createdAt: new Date().toISOString() 
+            };
+            state.students.push(newStudent);
+            input.value = '';
             saveState();
             toggleModal('add-student-modal', false);
             renderView();
@@ -285,7 +315,6 @@
         };
 
         const tick = () => {
-            const now = Date.now();
             Object.keys(state.activeTimers).forEach(id => {
                 updateSessionResult(id, 1);
             });
@@ -303,6 +332,7 @@
 
         const renderLive = () => {
             const container = document.getElementById('live-container');
+            if (!container) return;
             const session = getSession(state.currentSessionId);
             
             if(state.students.length === 0) {
@@ -348,7 +378,12 @@
 
         const renderStudents = () => {
             const container = document.getElementById('students-list');
-            container.innerHTML = state.students.map(s => `
+            if (!container) return;
+            if (state.students.length === 0) {
+                container.innerHTML = `<div class="py-20 text-center opacity-30"><p class="font-bold text-xs uppercase">La classe est vide</p></div>`;
+                return;
+            }
+            container.innerHTML = state.students.sort((a,b) => a.name.localeCompare(b.name)).map(s => `
                 <div class="flex items-center justify-between bg-white p-4 rounded-2xl border border-slate-100 group transition-all">
                     <div class="flex items-center gap-4">
                         <div class="h-10 w-10 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-black">${s.name.charAt(0)}</div>
@@ -363,33 +398,36 @@
         };
 
         const renderStats = () => {
-            // Calc stats
             const now = new Date();
             const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
             const startOfWeekStr = startOfWeek.toISOString().split('T')[0];
 
             let weeklyTotal = 0;
-            let monthAgg = {}; // id -> seconds
+            let monthAgg = {};
 
             state.sessions.forEach(sess => {
                 const date = sess.id;
                 const isThisWeek = date >= startOfWeekStr;
-                const isThisMonth = date >= new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0];
+                const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 3600 * 1000).toISOString().split('T')[0];
+                const isThisMonth = date >= thirtyDaysAgo;
 
-                Object.entries(sess.results).forEach(([id, res]) => {
+                Object.entries(sess.results || {}).forEach(([id, res]) => {
                     if(isThisWeek) weeklyTotal += res.total;
                     if(isThisMonth) monthAgg[id] = (monthAgg[id] || 0) + res.total;
                 });
             });
 
-            document.getElementById('stat-weekly-total').innerText = formatTime(weeklyTotal);
+            const weeklyEl = document.getElementById('stat-weekly-total');
+            if (weeklyEl) weeklyEl.innerText = formatTime(weeklyTotal);
             
             const sorted = Object.entries(monthAgg).sort((a,b) => b[1] - a[1]);
             const topStudentId = sorted[0]?.[0];
             const topStudent = state.students.find(s => s.id === topStudentId);
-            document.getElementById('stat-top-student').innerText = topStudent ? topStudent.name : '-';
+            const topEl = document.getElementById('stat-top-student');
+            if (topEl) topEl.innerText = topStudent ? topStudent.name : '-';
 
             const chartContainer = document.getElementById('chart-container');
+            if (!chartContainer) return;
             const maxVal = sorted[0]?.[1] || 1;
             
             chartContainer.innerHTML = sorted.slice(0, 5).map(([id, sec]) => {
@@ -416,8 +454,9 @@
             const selectedDate = picker.value;
             const session = state.sessions.find(s => s.id === selectedDate);
             const container = document.getElementById('history-list');
+            if (!container) return;
 
-            if(!session || Object.keys(session.results).length === 0) {
+            if(!session || Object.keys(session.results || {}).length === 0) {
                 container.innerHTML = `<div class="py-20 text-center opacity-30 font-bold text-xs uppercase tracking-widest">Aucune donnée pour ce jour</div>`;
                 return;
             }
@@ -441,7 +480,17 @@
         };
 
         // --- INIT ---
-        document.getElementById('history-date-picker').addEventListener('change', renderHistory);
+        const historyPicker = document.getElementById('history-date-picker');
+        if (historyPicker) historyPicker.addEventListener('change', renderHistory);
+        
+        // Ajout avec "Entrée"
+        const studentInput = document.getElementById('new-student-name');
+        if (studentInput) {
+            studentInput.addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') addStudent();
+            });
+        }
+
         lucide.createIcons();
         renderView();
 

@@ -2,7 +2,6 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebas
 import { getFirestore, collection, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 
 // --- GLOBAL STATE ---
-// On initialise directement l'objet global pour éviter "app is not defined"
 window.appState = {
     view: 'live',
     students: [],
@@ -16,8 +15,6 @@ window.appState = {
 // --- DATA RECOVERY ---
 function recoverData() {
     console.log("🔍 Scanning for data...");
-    
-    // Utilisation de tableaux vides par défaut pour éviter les erreurs
     let students = [];
     let sessions = [];
     
@@ -27,24 +24,15 @@ function recoverData() {
         
         const storedSessions = localStorage.getItem('chrono_track_sessions');
         if (storedSessions) sessions = JSON.parse(storedSessions);
-    } catch (e) {
-        console.error("Data parse error", e);
-    }
+    } catch (e) { console.error("Data parse error", e); }
 
-    // Récupération Legacy
-    try {
-        const legStudents = localStorage.getItem('ct_students');
-        if (legStudents) {
-            const parsed = JSON.parse(legStudents);
-            students = [...students, ...parsed];
-        }
-        
-        const ancStudents = localStorage.getItem('students');
-        if (ancStudents) {
-            const parsed = JSON.parse(ancStudents);
-            students = [...students, ...parsed];
-        }
-    } catch (e) { console.error("Legacy data error", e); }
+    // Legacy backup
+    if(students.length === 0) {
+        try {
+            const leg = localStorage.getItem('ct_students');
+            if(leg) students = JSON.parse(leg);
+        } catch(e) {}
+    }
 
     // Dédoublonnage
     const uniqueStudents = [];
@@ -60,7 +48,6 @@ function recoverData() {
 }
 
 // --- APP LOGIC ---
-// Assignation directe à window.app
 window.app = {
     async init() {
         const data = recoverData();
@@ -91,17 +78,36 @@ window.app = {
             this.updateSyncStatus('offline');
         }
 
-        // Render & Loop
+        // Initial Render
         this.navigate('live');
         if (window.lucide) window.lucide.createIcons();
         
-        setInterval(() => this.updateLiveUI(), 1000);
+        // GLOBAL TICK LOOP (Runs every 1s)
+        setInterval(() => {
+            this.tick();
+        }, 1000);
+    },
+
+    // Appelé chaque seconde
+    tick() {
+        // 1. Mettre à jour les données (Data Logic) - TOUJOURS
+        const activeIds = Object.keys(window.appState.activeTimes);
+        if (activeIds.length > 0) {
+            activeIds.forEach(sid => {
+                this.updateStudentSessionTime(sid);
+            });
+        }
+
+        // 2. Mettre à jour l'interface (UI Logic) - SEULEMENT SI LIVE
+        if (window.appState.view === 'live') {
+            this.updateLiveUI();
+        }
     },
 
     navigate(viewName) {
         window.appState.view = viewName;
         
-        // Update Tabs
+        // UI Tabs (Active state)
         document.querySelectorAll('.nav-btn').forEach(btn => {
             const isActive = btn.id === `nav-${viewName}`;
             btn.className = isActive 
@@ -109,11 +115,19 @@ window.app = {
                 : "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap";
         });
 
-        // Update Sections
-        document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
-        const target = document.getElementById(`view-${viewName}`);
-        if(target) target.classList.add('active');
+        // VIEW VISIBILITY TOGGLE (Utilisation de section-hidden)
+        const views = ['live', 'stats', 'history', 'students'];
+        views.forEach(v => {
+            const el = document.getElementById(`view-${v}`);
+            if(!el) return;
+            if (v === viewName) {
+                el.classList.remove('section-hidden');
+            } else {
+                el.classList.add('section-hidden');
+            }
+        });
 
+        // Trigger specific renderers
         if (viewName === 'live') this.renderLive();
         if (viewName === 'students') this.renderStudents();
         if (viewName === 'history') this.renderHistory();
@@ -125,7 +139,6 @@ window.app = {
     saveLocal() {
         localStorage.setItem('chrono_track_students', JSON.stringify(window.appState.students));
         localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
-        localStorage.setItem('ct_students', JSON.stringify(window.appState.students)); // Backup
         
         if (window.appState.isFirebaseReady) {
             this.saveToFirebase();
@@ -197,8 +210,7 @@ window.app = {
         window.appState.students.sort((a,b) => a.name.localeCompare(b.name));
         input.value = '';
         this.saveLocal();
-        this.renderStudents();
-        this.renderLive();
+        this.renderStudents(); // Refresh UI
     },
 
     deleteStudent(id) {
@@ -206,17 +218,18 @@ window.app = {
         window.appState.students = window.appState.students.filter(s => s.id !== id);
         this.saveLocal();
         this.renderStudents();
-        this.renderLive();
     },
 
     toggleTimer(studentId) {
         if (window.appState.activeTimes[studentId]) {
-            this.updateStudentSessionTime(studentId);
+            // Stop
+            this.updateStudentSessionTime(studentId); // Save last chunk
             delete window.appState.activeTimes[studentId];
         } else {
+            // Start
             window.appState.activeTimes[studentId] = Date.now();
         }
-        this.renderLive();
+        this.renderLive(); // Refresh buttons immediately
     },
 
     stepPassage(studentId) {
@@ -248,32 +261,47 @@ window.app = {
             if(!session) return;
             
             const res = session.results[studentId] || { total: 0, passages: [0] };
+            
+            // Calculer le nouveau total
             const newTotal = (res.total || 0) + elapsed;
-            let passages = res.passages || [0];
+            
+            // Mettre à jour le dernier passage
+            let passages = res.passages ? [...res.passages] : [0];
             if (passages.length === 0) passages = [0];
             passages[passages.length - 1] += elapsed;
 
+            // Sauvegarde dans l'état
             session.results[studentId] = { total: newTotal, passages: passages };
+            
+            // Reset le curseur de temps pour éviter de recompter
             window.appState.activeTimes[studentId] = now;
-            this.saveLocal();
+            
+            // Sauvegarde LocalStorage light (pas forcément FB à chaque seconde)
+            localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
         }
     },
 
     updateLiveUI() {
-        if (window.appState.view !== 'live') return;
+        // Mise à jour uniquement du DOM des temps
+        const session = window.appState.sessions.find(x => x.id === window.appState.currentSessionId);
+        if(!session) return;
         
         Object.keys(window.appState.activeTimes).forEach(sid => {
-            this.updateStudentSessionTime(sid);
             const el = document.getElementById(`time-${sid}`);
             if (el) {
-                const s = window.appState.sessions.find(x => x.id === window.appState.currentSessionId);
-                const res = s.results[sid];
+                const res = session.results[sid];
                 if (res) {
                     const pass = res.passages[res.passages.length - 1];
                     el.innerText = this.formatTime(pass);
                 }
             }
         });
+        
+        // Mettre à jour le temps total en haut
+        const totalLiveEl = document.getElementById('live-total-time');
+        if(totalLiveEl) {
+             // Calcul optionnel du total global si nécessaire
+        }
     },
 
     renderLive() {
@@ -283,7 +311,7 @@ window.app = {
         const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
         
         if (window.appState.students.length === 0) {
-            container.innerHTML = `<div class="text-center py-10 text-slate-400">Aucun élève.</div>`;
+            container.innerHTML = `<div class="text-center py-10 text-slate-400">Aucun élève. Allez dans l'onglet "Élèves".</div>`;
             return;
         }
 
@@ -324,45 +352,131 @@ window.app = {
     renderStudents() {
         const container = document.getElementById('students-list-container');
         if (!container) return;
+        
+        if (window.appState.students.length === 0) {
+            container.innerHTML = '<div class="text-slate-400 text-center text-sm py-4">Ajoutez votre premier élève ci-dessus.</div>';
+            return;
+        }
+
         container.innerHTML = window.appState.students.map(s => `
             <div class="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
-                <span class="font-bold text-slate-700">${s.name}</span>
-                <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500"><i data-lucide="trash-2" class="w-4 h-4"></i></button>
+                <div class="flex items-center gap-3">
+                    <div class="h-8 w-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-bold text-xs">
+                        ${s.name.charAt(0)}
+                    </div>
+                    <span class="font-bold text-slate-700">${s.name}</span>
+                </div>
+                <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-2">
+                    <i data-lucide="trash-2" class="w-4 h-4"></i>
+                </button>
             </div>
         `).join('');
         if (window.lucide) window.lucide.createIcons();
     },
 
     renderStats() {
-        // Stats simplifiées pour éviter les erreurs de syntaxe
         let total = 0;
         let sessionsCount = window.appState.sessions.length;
+        let activeStudentCount = 0;
+        let bestStudent = { name: '-', time: 0 };
+        const studentTimes = {};
+
+        // Calculs Stats
         window.appState.sessions.forEach(sess => {
-            Object.values(sess.results).forEach(r => total += (r.total || 0));
+            Object.entries(sess.results).forEach(([sid, r]) => {
+                if(r.total > 0) {
+                    total += r.total;
+                    studentTimes[sid] = (studentTimes[sid] || 0) + r.total;
+                }
+            });
         });
+
+        activeStudentCount = Object.keys(studentTimes).length;
         
+        // Trouver le meilleur
+        Object.entries(studentTimes).forEach(([sid, time]) => {
+            if(time > bestStudent.time) {
+                const s = window.appState.students.find(st => st.id === sid);
+                bestStudent = { name: s ? s.name : sid, time: time };
+            }
+        });
+
         const elTotal = document.getElementById('stat-total-hours');
-        if(elTotal) elTotal.innerText = Math.floor(total / 3600) + 'h';
+        if(elTotal) elTotal.innerText = (total / 3600).toFixed(1) + 'h';
+        
         const elSess = document.getElementById('stat-total-sessions');
         if(elSess) elSess.innerText = sessionsCount;
 
-        // Chart
+        const elActive = document.getElementById('stat-active-students');
+        if(elActive) elActive.innerText = activeStudentCount;
+
+        const elBest = document.getElementById('stat-top-perf');
+        if(elBest) elBest.innerText = bestStudent.name;
+
+        // ChartJS FIX: Destroy old instance
         const ctx = document.getElementById('weeklyChart');
-        if (ctx && window.Chart && !window.myChart) {
-             window.myChart = new Chart(ctx, {
+        if (ctx && window.Chart) {
+            if (window.myChart instanceof Chart) {
+                window.myChart.destroy();
+            }
+            
+            // Préparation données graph
+            const sortedStudents = Object.entries(studentTimes)
+                .sort(([,a], [,b]) => b - a)
+                .slice(0, 7);
+
+            window.myChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: ['Lun', 'Mar', 'Mer', 'Jeu', 'Ven'],
-                    datasets: [{ label: 'Activité', data: [0,0,0,0,0], backgroundColor: '#4f46e5', borderRadius: 5 }]
+                    labels: sortedStudents.map(([sid]) => {
+                        const s = window.appState.students.find(st => st.id === sid);
+                        return s ? s.name : sid.substring(0,4);
+                    }),
+                    datasets: [{
+                        label: 'Secondes',
+                        data: sortedStudents.map(([,t]) => t),
+                        backgroundColor: '#4f46e5',
+                        borderRadius: 6
+                    }]
                 },
-                options: { responsive: true, maintainAspectRatio: false }
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        y: { beginAtZero: true, grid: { display: false } },
+                        x: { grid: { display: false } }
+                    }
+                }
             });
         }
     },
 
     renderHistory() {
         const container = document.getElementById('history-content');
-        if(container) container.innerHTML = '<div class="text-center py-10 text-slate-300">Historique (WIP)</div>';
+        const dateInput = document.getElementById('history-date');
+        
+        if(!dateInput.value) dateInput.value = window.appState.currentSessionId;
+        const targetDate = dateInput.value;
+        const session = window.appState.sessions.find(s => s.id === targetDate);
+
+        if (!session) {
+            container.innerHTML = `<div class="text-center py-10 text-slate-300">Aucune session enregistrée à cette date.</div>`;
+            return;
+        }
+
+        container.innerHTML = window.appState.students.map(s => {
+            const res = session.results[s.id];
+            if (!res || res.total === 0) return '';
+            
+            return `
+            <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center">
+                <span class="font-bold text-slate-700">${s.name}</span>
+                <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded text-xs">
+                    ${this.formatTime(res.total)}
+                </span>
+            </div>`;
+        }).join('') || `<div class="text-center py-10 text-slate-300">Aucune activité ce jour-là.</div>`;
     },
 
     formatTime(s) {
@@ -376,8 +490,13 @@ window.app = {
 // Start
 document.addEventListener('DOMContentLoaded', () => {
     window.app.init();
+    
+    // Listeners supplémentaires
     const input = document.getElementById('new-student-input');
     if(input) input.addEventListener('keypress', (e) => {
         if(e.key === 'Enter') window.app.addStudent();
     });
+
+    const histDate = document.getElementById('history-date');
+    if(histDate) histDate.addEventListener('change', () => window.app.renderHistory());
 });

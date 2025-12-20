@@ -76,6 +76,7 @@ window.app = {
                 this.updateSyncStatus('error');
             }
         } else {
+            console.warn("Firebase Config missing or incomplete. Running in offline mode.");
             this.updateSyncStatus('offline');
         }
 
@@ -233,11 +234,9 @@ window.app = {
         this.renderLive(); // Refresh buttons immediately
     },
 
-    // --- NEW FUNCTION: Reset student session ---
     resetStudentSession(studentId) {
         if(!confirm("Réinitialiser le temps de cet élève pour cette session ?")) return;
         
-        // Stop timer if running
         if (window.appState.activeTimes[studentId]) {
             delete window.appState.activeTimes[studentId];
         }
@@ -327,7 +326,6 @@ window.app = {
         const container = document.getElementById('live-list');
         const dateEl = document.getElementById('live-session-date');
         
-        // Set date
         if(dateEl) {
             const today = new Date();
             dateEl.innerText = today.toLocaleDateString('fr-FR');
@@ -347,7 +345,6 @@ window.app = {
             const isActive = !!window.appState.activeTimes[s.id];
             const currentPassage = res.passages ? res.passages[res.passages.length - 1] : 0;
 
-            // Compact View HTML with Reset Button
             return `
             <div class="bg-white p-2 rounded-xl border transition-all flex items-center justify-between gap-2 ${isActive ? 'timer-active shadow-md' : 'border-slate-100'}">
                 <div class="flex items-center gap-3 overflow-hidden flex-1">
@@ -407,7 +404,6 @@ window.app = {
 
     toggleChart(mode) {
         window.appState.chartMode = mode;
-        // Update buttons style
         const btnWeek = document.getElementById('chart-btn-week');
         const btnMonth = document.getElementById('chart-btn-month');
         
@@ -421,22 +417,50 @@ window.app = {
         this.renderStats();
     },
 
+    // --- UTILS FORMAT ---
+    
+    // Pour les totaux (heures et minutes)
+    formatDurationHM(seconds) {
+        if (!seconds) return "0m";
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        
+        if (h > 0) return `${h}h ${m}m`;
+        return `${m}m`;
+    },
+
+    // Pour les moyennes (minutes et secondes)
+    formatDurationMS(seconds) {
+        if (!seconds) return "0s";
+        const m = Math.floor(seconds / 60);
+        const s = Math.floor(seconds % 60);
+        
+        if (m > 0) return `${m}m ${s}s`;
+        return `${s}s`;
+    },
+    
+    // Pour l'affichage "00:00" standard (Live view)
+    formatTime(s) {
+        if (!s) return "00:00";
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return (m<10?"0"+m:m) + ":" + (sec<10?"0"+sec:sec);
+    },
+
     renderStats() {
-        // Calculate Totals: Daily, Weekly, Monthly
         const today = new Date().toISOString().split('T')[0];
         const now = new Date();
         const oneWeekAgo = new Date(); oneWeekAgo.setDate(now.getDate() - 7);
-        const currentMonthPrefix = today.substring(0, 7); // YYYY-MM
+        const currentMonthPrefix = today.substring(0, 7); 
 
         let dailyTotal = 0;
         let weeklyTotal = 0;
         let monthlyTotal = 0;
         
-        let weeklyStudentTimes = {}; // StudentId -> Seconds
+        let weeklyStudentTimes = {}; 
         let weeklyActiveCountSet = new Set();
         let monthlyActiveCountSet = new Set();
         
-        // Global Active Students Logic (kept for legacy card "Total Active")
         const allStudentTimes = {};
 
         window.appState.sessions.forEach(sess => {
@@ -445,7 +469,6 @@ window.app = {
             const isThisWeek = (sDate >= oneWeekAgo && sDate <= now);
             const isThisMonth = sess.id.startsWith(currentMonthPrefix);
 
-            // Calculate session totals and specific period totals
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
                 sessTotal += t;
@@ -463,42 +486,38 @@ window.app = {
                 }
             });
 
-            // Daily
             if (sess.id === today) dailyTotal += sessTotal;
-            // Monthly
             if (isThisMonth) monthlyTotal += sessTotal;
-            // Weekly
             if (isThisWeek) weeklyTotal += sessTotal;
         });
 
-        // CALCULATE AVERAGES
-        const weekActiveCount = weeklyActiveCountSet.size || 1; // avoid division by zero
+        // CALCULATE AVERAGES (Active students only)
+        const weekActiveCount = weeklyActiveCountSet.size || 1;
         const monthActiveCount = monthlyActiveCountSet.size || 1;
         
         const avgWeek = weeklyTotal / weekActiveCount;
         const avgMonth = monthlyTotal / monthActiveCount;
 
-        // Update DOM Cards
+        // Update DOM Cards with NEW FORMAT
         const elDaily = document.getElementById('stat-daily-hours');
-        if(elDaily) elDaily.innerText = (dailyTotal / 3600).toFixed(1) + 'h';
+        if(elDaily) elDaily.innerText = this.formatDurationHM(dailyTotal);
 
         const elWeekly = document.getElementById('stat-weekly-hours');
-        if(elWeekly) elWeekly.innerText = (weeklyTotal / 3600).toFixed(1) + 'h';
+        if(elWeekly) elWeekly.innerText = this.formatDurationHM(weeklyTotal);
 
         const elMonthly = document.getElementById('stat-monthly-hours');
-        if(elMonthly) elMonthly.innerText = (monthlyTotal / 3600).toFixed(1) + 'h';
+        if(elMonthly) elMonthly.innerText = this.formatDurationHM(monthlyTotal);
         
-        // New Averages
         const elAvgWeek = document.getElementById('stat-avg-week');
-        if(elAvgWeek) elAvgWeek.innerText = (avgWeek / 3600).toFixed(1) + 'h';
+        if(elAvgWeek) elAvgWeek.innerText = this.formatDurationMS(avgWeek);
         
         const elAvgMonth = document.getElementById('stat-avg-month');
-        if(elAvgMonth) elAvgMonth.innerText = (avgMonth / 3600).toFixed(1) + 'h';
+        if(elAvgMonth) elAvgMonth.innerText = this.formatDurationMS(avgMonth);
 
         const elActive = document.getElementById('stat-active-students');
         if(elActive) elActive.innerText = Object.keys(allStudentTimes).length;
 
-        // TOP 5 STUDENTS (WEEK)
+        // TOP 5 STUDENTS
         const topContainer = document.getElementById('dashboard-top-students');
         if(topContainer) {
             const sortedStudents = Object.entries(weeklyStudentTimes)
@@ -517,7 +536,7 @@ window.app = {
                              <div class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 font-bold text-xs flex items-center justify-center">${index + 1}</div>
                              <span class="text-slate-700 font-bold">${name}</span>
                         </div>
-                        <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${this.formatTime(time)}</span>
+                        <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${this.formatDurationHM(time)}</span>
                     </div>`;
                 }).join('');
             }
@@ -532,7 +551,6 @@ window.app = {
             let dataPoints = [];
             
             if (window.appState.chartMode === 'week') {
-                // Last 7 days names
                 for(let i=6; i>=0; i--) {
                     const d = new Date(); d.setDate(now.getDate() - i);
                     const dateStr = d.toISOString().split('T')[0];
@@ -545,7 +563,6 @@ window.app = {
                     dataPoints.push(Math.floor(val/60)); // Minutes
                 }
             } else {
-                // Last 15 days
                 for(let i=14; i>=0; i--) {
                     const d = new Date(); d.setDate(now.getDate() - i);
                     const dateStr = d.toISOString().split('T')[0];
@@ -605,30 +622,19 @@ window.app = {
             <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
                 <span class="font-bold text-slate-700 text-sm">${s.name}</span>
                 <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded text-xs">
-                    ${this.formatTime(res.total)}
+                    ${this.formatDurationHM(res.total)}
                 </span>
             </div>`;
         }).join('') || `<div class="text-center py-10 text-slate-300">Aucune activité ce jour-là.</div>`;
-    },
-
-    formatTime(s) {
-        if (!s) return "00:00";
-        const m = Math.floor(s / 60);
-        const sec = s % 60;
-        return (m<10?"0"+m:m) + ":" + (sec<10?"0"+sec:sec);
     }
 };
 
-// Start
 document.addEventListener('DOMContentLoaded', () => {
     window.app.init();
-    
-    // Listeners supplémentaires
     const input = document.getElementById('new-student-input');
     if(input) input.addEventListener('keypress', (e) => {
         if(e.key === 'Enter') window.app.addStudent();
     });
-
     const histDate = document.getElementById('history-date');
     if(histDate) histDate.addEventListener('change', () => window.app.renderHistory());
 });

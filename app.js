@@ -4,12 +4,12 @@ import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gsta
 
 // --- GLOBAL STATE ---
 window.appState = {
-    view: 'stats', // Default view is now Stats (Dashboard)
+    view: 'stats',
     students: [],
     sessions: [],
     currentSessionId: new Date().toISOString().split('T')[0],
     activeTimes: {},
-    chartMode: 'week', // 'week' or 'month'
+    chartMode: 'week',
     db: null,
     isFirebaseReady: false
 };
@@ -28,30 +28,13 @@ function recoverData() {
         if (storedSessions) sessions = JSON.parse(storedSessions);
     } catch (e) { console.error("Data parse error", e); }
 
-    // Legacy backup
-    if(students.length === 0) {
-        try {
-            const leg = localStorage.getItem('ct_students');
-            if(leg) students = JSON.parse(leg);
-        } catch(e) {}
-    }
-
-    // Dédoublonnage
-    const uniqueStudents = [];
-    const seenNames = new Set();
-    students.forEach(s => {
-        if (s && s.name && !seenNames.has(s.name)) {
-            seenNames.add(s.name);
-            uniqueStudents.push(s);
-        }
-    });
-
-    return { students: uniqueStudents, sessions: sessions };
+    return { students: students || [], sessions: sessions || [] };
 }
 
 // --- APP LOGIC ---
 window.app = {
     async init() {
+        // 1. Load Local Data First
         const data = recoverData();
         window.appState.students = data.students;
         window.appState.sessions = data.sessions;
@@ -61,66 +44,69 @@ window.app = {
         if (!todaySession) {
             todaySession = { id: window.appState.currentSessionId, date: new Date().toISOString(), results: {} };
             window.appState.sessions.push(todaySession);
-            this.saveLocal();
+            this.saveLocal(); // Save immediately to create structure
         }
 
-        // Firebase Init (Secure Mode)
+        // 2. Firebase Init (Secure Mode)
         if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
+            
+            // Check protocol for debugging
+            if (window.location.protocol === 'file:') {
+                alert("ATTENTION: Firebase ne fonctionne pas en ouvrant le fichier directement (file://). Vous devez utiliser un serveur local (http://localhost) ou héberger le site.");
+            }
+
             try {
                 const fbApp = initializeApp(window.FIREBASE_CONFIG);
                 window.appState.db = getFirestore(fbApp);
                 const auth = getAuth(fbApp);
 
-                this.updateSyncStatus('syncing'); // Show connecting state
+                this.updateSyncStatus('syncing');
 
-                // Listen for successful login
                 onAuthStateChanged(auth, async (user) => {
                     if (user) {
                         console.log("🔒 Secured Connection Established (UID: " + user.uid + ")");
                         window.appState.isFirebaseReady = true;
                         this.updateSyncStatus('online');
-                        await this.syncFromFirebase();
+                        // Force download on connect
+                        await this.syncFromFirebase(true); 
                     } else {
-                        // Logged out
                         window.appState.isFirebaseReady = false;
                         this.updateSyncStatus('offline');
                     }
                 });
 
-                // Attempt Anonymous Login
                 await signInAnonymously(auth);
 
             } catch (e) {
                 console.error("Firebase Init Error:", e);
-                // Si l'auth échoue (ex: pas activé dans la console), on passe en erreur mais l'app reste utilisable localement
                 this.updateSyncStatus('error');
+                
+                // DIAGNOSTIC ALERT FOR USER
+                if (e.code === 'auth/operation-not-allowed') {
+                    alert("ERREUR CONFIGURATION: Vous n'avez pas activé l'authentification Anonyme dans la console Firebase (Onglet Authentication > Sign-in method).");
+                } else if (e.code === 'auth/network-request-failed') {
+                    alert("ERREUR RÉSEAU: Vérifiez votre connexion internet.");
+                } else if (e.message && e.message.includes("domain")) {
+                    alert("DOMAINE NON AUTORISÉ: Allez dans Firebase Console > Authentication > Settings > Authorized Domains et ajoutez le domaine ou l'IP que vous utilisez.");
+                }
             }
         } else {
-            console.warn("Firebase Config missing or incomplete. Running in offline mode.");
+            console.warn("Firebase Config missing.");
             this.updateSyncStatus('offline');
         }
 
         // Initial Render
-        this.navigate('stats'); // Force dashboard on start
+        this.navigate('stats');
         if (window.lucide) window.lucide.createIcons();
         
-        // GLOBAL TICK LOOP (Runs every 1s)
-        setInterval(() => {
-            this.tick();
-        }, 1000);
+        setInterval(() => { this.tick(); }, 1000);
     },
 
-    // Appelé chaque seconde
     tick() {
-        // 1. Mettre à jour les données (Data Logic) - TOUJOURS
         const activeIds = Object.keys(window.appState.activeTimes);
         if (activeIds.length > 0) {
-            activeIds.forEach(sid => {
-                this.updateStudentSessionTime(sid);
-            });
+            activeIds.forEach(sid => { this.updateStudentSessionTime(sid); });
         }
-
-        // 2. Mettre à jour l'interface (UI Logic) - SEULEMENT SI LIVE
         if (window.appState.view === 'live') {
             this.updateLiveUI();
         }
@@ -128,8 +114,6 @@ window.app = {
 
     navigate(viewName) {
         window.appState.view = viewName;
-        
-        // UI Tabs (Active state)
         document.querySelectorAll('.nav-btn').forEach(btn => {
             const isActive = btn.id === `nav-${viewName}`;
             btn.className = isActive 
@@ -137,19 +121,13 @@ window.app = {
                 : "nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap";
         });
 
-        // VIEW VISIBILITY TOGGLE (Utilisation de section-hidden)
         const views = ['live', 'stats', 'history', 'students'];
         views.forEach(v => {
             const el = document.getElementById(`view-${v}`);
             if(!el) return;
-            if (v === viewName) {
-                el.classList.remove('section-hidden');
-            } else {
-                el.classList.add('section-hidden');
-            }
+            el.classList.toggle('section-hidden', v !== viewName);
         });
 
-        // Trigger specific renderers
         if (viewName === 'live') this.renderLive();
         if (viewName === 'students') this.renderStudents();
         if (viewName === 'history') this.renderHistory();
@@ -180,18 +158,45 @@ window.app = {
         }
     },
 
-    async syncFromFirebase() {
+    async syncFromFirebase(forceUpdate = false) {
         if (!window.appState.db || !window.appState.isFirebaseReady) return;
         try {
-            const snap = await getDoc(doc(window.appState.db, "data", "students"));
-            if (snap.exists()) {
-                const list = snap.data().list || [];
-                if (list.length > window.appState.students.length) {
-                    window.appState.students = list;
-                    this.saveLocal();
+            const snapStudents = await getDoc(doc(window.appState.db, "data", "students"));
+            const snapSessions = await getDoc(doc(window.appState.db, "data", "sessions"));
+            
+            let hasChanges = false;
+
+            if (snapStudents.exists()) {
+                const remoteList = snapStudents.data().list || [];
+                // Simple merge logic: if remote has more or different data, take it.
+                // For this prototype, we prioritize Remote data on load to ensure sync.
+                if (forceUpdate || remoteList.length > 0) {
+                     window.appState.students = remoteList;
+                     hasChanges = true;
                 }
             }
-        } catch (e) { console.error(e); }
+
+            if (snapSessions.exists()) {
+                const remoteSessions = snapSessions.data().list || [];
+                if (forceUpdate || remoteSessions.length > 0) {
+                    window.appState.sessions = remoteSessions;
+                    hasChanges = true;
+                }
+            }
+
+            if (hasChanges) {
+                console.log("📥 Data synchronized from cloud");
+                this.saveLocal(); // Update local storage
+                // Re-render current view
+                this.navigate(window.appState.view);
+            }
+
+        } catch (e) { 
+            console.error("Sync Error:", e);
+            if(e.code === 'permission-denied') {
+                alert("PERMISSION REFUSÉE: Vérifiez vos Règles de sécurité Firestore.");
+            }
+        }
     },
 
     updateSyncStatus(status) {
@@ -201,15 +206,15 @@ window.app = {
 
         if (status === 'online') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>`;
-            text.innerText = "ONLINE (SECURE)";
+            text.innerText = "ONLINE";
             text.className = "text-[10px] text-green-600 font-bold uppercase tracking-wider";
         } else if (status === 'syncing') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>`;
-            text.innerText = "CONNECTING...";
+            text.innerText = "SYNC...";
             text.className = "text-[10px] text-blue-600 font-bold uppercase tracking-wider";
         } else if (status === 'error') {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>`;
-            text.innerText = "AUTH ERROR";
+            text.innerText = "ERREUR";
             text.className = "text-[10px] text-red-500 font-bold uppercase tracking-wider";
         } else {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>`;
@@ -231,8 +236,8 @@ window.app = {
         });
         window.appState.students.sort((a,b) => a.name.localeCompare(b.name));
         input.value = '';
-        this.saveLocal();
-        this.renderStudents(); // Refresh UI
+        this.saveLocal(); // Triggers Firebase Save
+        this.renderStudents();
     },
 
     deleteStudent(id) {
@@ -244,22 +249,17 @@ window.app = {
 
     toggleTimer(studentId) {
         if (window.appState.activeTimes[studentId]) {
-            // Stop
-            this.updateStudentSessionTime(studentId); // Save last chunk
+            this.updateStudentSessionTime(studentId);
             delete window.appState.activeTimes[studentId];
         } else {
-            // Start
             window.appState.activeTimes[studentId] = Date.now();
         }
-        this.renderLive(); // Refresh buttons immediately
+        this.renderLive();
     },
 
     resetStudentSession(studentId) {
         if(!confirm("Réinitialiser le temps de cet élève pour cette session ?")) return;
-        
-        if (window.appState.activeTimes[studentId]) {
-            delete window.appState.activeTimes[studentId];
-        }
+        if (window.appState.activeTimes[studentId]) delete window.appState.activeTimes[studentId];
 
         const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
         if(session && session.results[studentId]) {
@@ -274,7 +274,6 @@ window.app = {
             this.updateStudentSessionTime(studentId);
             window.appState.activeTimes[studentId] = Date.now();
         }
-        
         const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
         if(!session) return;
         
@@ -298,22 +297,13 @@ window.app = {
             if(!session) return;
             
             const res = session.results[studentId] || { total: 0, passages: [0] };
-            
-            // Calculer le nouveau total
             const newTotal = (res.total || 0) + elapsed;
-            
-            // Mettre à jour le dernier passage
             let passages = res.passages ? [...res.passages] : [0];
             if (passages.length === 0) passages = [0];
             passages[passages.length - 1] += elapsed;
 
-            // Sauvegarde dans l'état
             session.results[studentId] = { total: newTotal, passages: passages };
-            
-            // Reset le curseur de temps pour éviter de recompter
             window.appState.activeTimes[studentId] = now;
-            
-            // Sauvegarde LocalStorage light (pas forcément FB à chaque seconde)
             localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
         }
     },
@@ -332,8 +322,6 @@ window.app = {
                 }
             }
         });
-        
-        // Update global time
         const totalLiveEl = document.getElementById('live-total-time');
         if(totalLiveEl) {
              let totalSec = 0;
@@ -345,14 +333,9 @@ window.app = {
     renderLive() {
         const container = document.getElementById('live-list');
         const dateEl = document.getElementById('live-session-date');
-        
-        if(dateEl) {
-            const today = new Date();
-            dateEl.innerText = today.toLocaleDateString('fr-FR');
-        }
+        if(dateEl) dateEl.innerText = new Date().toLocaleDateString('fr-FR');
 
         if (!container) return;
-
         const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
         
         if (window.appState.students.length === 0) {
@@ -437,29 +420,22 @@ window.app = {
         this.renderStats();
     },
 
-    // --- UTILS FORMAT ---
-    
-    // Pour les totaux (heures et minutes)
     formatDurationHM(seconds) {
         if (!seconds) return "0m";
         const h = Math.floor(seconds / 3600);
         const m = Math.floor((seconds % 3600) / 60);
-        
         if (h > 0) return `${h}h ${m}m`;
         return `${m}m`;
     },
 
-    // Pour les moyennes (minutes et secondes)
     formatDurationMS(seconds) {
         if (!seconds) return "0s";
         const m = Math.floor(seconds / 60);
         const s = Math.floor(seconds % 60);
-        
         if (m > 0) return `${m}m ${s}s`;
         return `${s}s`;
     },
     
-    // Pour l'affichage "00:00" standard (Live view)
     formatTime(s) {
         if (!s) return "00:00";
         const m = Math.floor(s / 60);
@@ -476,11 +452,9 @@ window.app = {
         let dailyTotal = 0;
         let weeklyTotal = 0;
         let monthlyTotal = 0;
-        
         let weeklyStudentTimes = {}; 
         let weeklyActiveCountSet = new Set();
         let monthlyActiveCountSet = new Set();
-        
         const allStudentTimes = {};
 
         window.appState.sessions.forEach(sess => {
@@ -492,58 +466,41 @@ window.app = {
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
                 sessTotal += t;
-                
                 if(t > 0) {
                     allStudentTimes[sid] = (allStudentTimes[sid] || 0) + t;
-                    
                     if(isThisWeek) {
                          weeklyActiveCountSet.add(sid);
                          weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
                     }
-                    if(isThisMonth) {
-                        monthlyActiveCountSet.add(sid);
-                    }
+                    if(isThisMonth) monthlyActiveCountSet.add(sid);
                 }
             });
-
             if (sess.id === today) dailyTotal += sessTotal;
             if (isThisMonth) monthlyTotal += sessTotal;
             if (isThisWeek) weeklyTotal += sessTotal;
         });
 
-        // CALCULATE AVERAGES (Active students only)
         const weekActiveCount = weeklyActiveCountSet.size || 1;
         const monthActiveCount = monthlyActiveCountSet.size || 1;
-        
         const avgWeek = weeklyTotal / weekActiveCount;
         const avgMonth = monthlyTotal / monthActiveCount;
 
-        // Update DOM Cards with NEW FORMAT
         const elDaily = document.getElementById('stat-daily-hours');
         if(elDaily) elDaily.innerText = this.formatDurationHM(dailyTotal);
-
         const elWeekly = document.getElementById('stat-weekly-hours');
         if(elWeekly) elWeekly.innerText = this.formatDurationHM(weeklyTotal);
-
         const elMonthly = document.getElementById('stat-monthly-hours');
         if(elMonthly) elMonthly.innerText = this.formatDurationHM(monthlyTotal);
-        
         const elAvgWeek = document.getElementById('stat-avg-week');
         if(elAvgWeek) elAvgWeek.innerText = this.formatDurationMS(avgWeek);
-        
         const elAvgMonth = document.getElementById('stat-avg-month');
         if(elAvgMonth) elAvgMonth.innerText = this.formatDurationMS(avgMonth);
-
         const elActive = document.getElementById('stat-active-students');
         if(elActive) elActive.innerText = Object.keys(allStudentTimes).length;
 
-        // TOP 5 STUDENTS
         const topContainer = document.getElementById('dashboard-top-students');
         if(topContainer) {
-            const sortedStudents = Object.entries(weeklyStudentTimes)
-                .sort(([, a], [, b]) => b - a)
-                .slice(0, 5);
-            
+            const sortedStudents = Object.entries(weeklyStudentTimes).sort(([, a], [, b]) => b - a).slice(0, 5);
             if(sortedStudents.length === 0) {
                 topContainer.innerHTML = '<div class="text-slate-400 text-xs italic">Aucune activité cette semaine.</div>';
             } else {
@@ -562,11 +519,9 @@ window.app = {
             }
         }
 
-        // Chart Logic
         const ctx = document.getElementById('mainChart');
         if (ctx && window.Chart) {
             if (window.myChart instanceof Chart) window.myChart.destroy();
-            
             let labels = [];
             let dataPoints = [];
             
@@ -576,11 +531,10 @@ window.app = {
                     const dateStr = d.toISOString().split('T')[0];
                     const dayName = d.toLocaleDateString('fr-FR', { weekday: 'short' });
                     labels.push(dayName);
-                    
                     const sess = window.appState.sessions.find(s => s.id === dateStr);
                     let val = 0;
                     if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
-                    dataPoints.push(Math.floor(val/60)); // Minutes
+                    dataPoints.push(Math.floor(val/60)); 
                 }
             } else {
                 for(let i=14; i>=0; i--) {
@@ -588,14 +542,12 @@ window.app = {
                     const dateStr = d.toISOString().split('T')[0];
                     const dayNum = d.getDate();
                     labels.push(dayNum);
-                    
                     const sess = window.appState.sessions.find(s => s.id === dateStr);
                     let val = 0;
                     if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
                     dataPoints.push(Math.floor(val/60));
                 }
             }
-
             window.myChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
@@ -624,20 +576,16 @@ window.app = {
     renderHistory() {
         const container = document.getElementById('history-content');
         const dateInput = document.getElementById('history-date');
-        
         if(!dateInput.value) dateInput.value = window.appState.currentSessionId;
         const targetDate = dateInput.value;
         const session = window.appState.sessions.find(s => s.id === targetDate);
-
         if (!session) {
             container.innerHTML = `<div class="text-center py-10 text-slate-300">Aucune session enregistrée à cette date.</div>`;
             return;
         }
-
         container.innerHTML = window.appState.students.map(s => {
             const res = session.results[s.id];
             if (!res || res.total === 0) return '';
-            
             return `
             <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
                 <span class="font-bold text-slate-700 text-sm">${s.name}</span>

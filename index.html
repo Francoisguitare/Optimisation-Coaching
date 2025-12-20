@@ -52,11 +52,13 @@
         </div>
 
         <div class="flex bg-slate-100 p-1 rounded-xl gap-1 overflow-x-auto no-scrollbar">
+            <!-- Order changed: Stats is now the primary landing, but in the menu order implies navigation. Let's keep logical order but Stats first might be weird in UI. 
+                 User asked for dashboard on open. Order in menu doesn't strictly dictate default, but usually Dashboard is first. -->
+            <button onclick="window.app?.navigate('stats')" id="nav-stats" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
+                <i data-lucide="layout-dashboard" class="w-4 h-4 mr-2"></i>DASHBOARD
+            </button>
             <button onclick="window.app?.navigate('live')" id="nav-live" class="nav-btn active flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all whitespace-nowrap bg-white text-indigo-600 shadow-sm">
                 <i data-lucide="play" class="w-4 h-4 mr-2"></i>LIVE
-            </button>
-            <button onclick="window.app?.navigate('stats')" id="nav-stats" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
-                <i data-lucide="pie-chart" class="w-4 h-4 mr-2"></i>STATS
             </button>
             <button onclick="window.app?.navigate('history')" id="nav-history" class="nav-btn flex items-center px-4 py-2 rounded-lg text-xs font-bold transition-all text-slate-500 hover:bg-white/50 whitespace-nowrap">
                 <i data-lucide="calendar" class="w-4 h-4 mr-2"></i>HISTO
@@ -72,46 +74,98 @@
         
         <!-- VIEW: LIVE -->
         <div id="view-live" class="view-section h-full flex flex-col">
-            <div class="p-4 border-b border-slate-200 bg-white/50 backdrop-blur-sm flex justify-between items-center sticky top-0 z-10 shrink-0">
-                <h2 class="font-bold text-slate-700 text-sm">Session en cours</h2>
-                <span id="live-total-time" class="font-mono text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-lg">00:00</span>
+            <div class="p-3 border-b border-slate-200 bg-white/50 backdrop-blur-sm flex justify-between items-center sticky top-0 z-10 shrink-0">
+                <div>
+                    <h2 class="font-bold text-slate-700 text-sm">Session en cours</h2>
+                    <p class="text-[10px] text-slate-500 font-medium">Date d'enregistrement: <span id="live-session-date" class="text-indigo-600 font-bold">--/--/----</span></p>
+                </div>
+                <span id="live-total-time" class="font-mono text-indigo-600 font-bold bg-indigo-50 px-3 py-1 rounded-lg text-sm">00:00</span>
             </div>
-            <div id="live-list" class="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar relative z-0">
+            <div id="live-list" class="flex-1 overflow-y-auto p-2 space-y-2 custom-scrollbar relative z-0">
                 <!-- Students injected here -->
             </div>
         </div>
 
-        <!-- VIEW: STATS -->
+        <!-- VIEW: STATS (DASHBOARD) -->
         <div id="view-stats" class="view-section h-full overflow-y-auto p-4 custom-scrollbar section-hidden">
             <div class="max-w-4xl mx-auto space-y-6">
-                <!-- Summary Cards -->
-                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
-                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">Total Heures</p>
-                        <h3 id="stat-total-hours" class="text-2xl font-black text-slate-800">0h</h3>
+                <!-- Header with Period Selection Context (Visual only as per current logic, or functional) -->
+                <div class="flex justify-between items-end">
+                    <div>
+                        <h2 class="text-2xl font-black text-slate-800">Tableau de bord</h2>
+                        <p class="text-slate-500 text-sm">Vue d'ensemble de l'activité</p>
                     </div>
-                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">Sessions</p>
-                        <h3 id="stat-total-sessions" class="text-2xl font-black text-indigo-600">0</h3>
+                </div>
+
+                <!-- Summary Cards: Daily, Weekly, Monthly -->
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-3">
+                    <!-- Daily -->
+                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
+                        <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i data-lucide="clock" class="w-12 h-12 text-indigo-600"></i>
+                        </div>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Aujourd'hui</p>
+                        <h3 id="stat-daily-hours" class="text-2xl font-black text-slate-800 mt-1">0h</h3>
+                        <p class="text-[10px] text-indigo-500 font-medium mt-1">Heures enregistrées</p>
                     </div>
-                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">Élèves Actifs</p>
-                        <h3 id="stat-active-students" class="text-2xl font-black text-emerald-500">0</h3>
+
+                    <!-- Weekly -->
+                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
+                        <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i data-lucide="calendar-days" class="w-12 h-12 text-emerald-600"></i>
+                        </div>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Cette Semaine</p>
+                        <h3 id="stat-weekly-hours" class="text-2xl font-black text-slate-800 mt-1">0h</h3>
+                        <p class="text-[10px] text-emerald-500 font-medium mt-1">Derniers 7 jours</p>
                     </div>
-                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase">Top Perf</p>
-                        <h3 id="stat-top-perf" class="text-lg font-bold text-slate-800 truncate">-</h3>
+
+                    <!-- Monthly -->
+                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
+                        <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i data-lucide="calendar-range" class="w-12 h-12 text-blue-600"></i>
+                        </div>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Ce Mois</p>
+                        <h3 id="stat-monthly-hours" class="text-2xl font-black text-slate-800 mt-1">0h</h3>
+                        <p class="text-[10px] text-blue-500 font-medium mt-1">Mois en cours</p>
+                    </div>
+
+                    <!-- Active Students -->
+                    <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden group">
+                        <div class="absolute right-0 top-0 p-3 opacity-10 group-hover:opacity-20 transition-opacity">
+                            <i data-lucide="users" class="w-12 h-12 text-amber-600"></i>
+                        </div>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Élèves</p>
+                        <h3 id="stat-active-students" class="text-2xl font-black text-slate-800 mt-1">0</h3>
+                        <p class="text-[10px] text-amber-500 font-medium mt-1">Ont pratiqué</p>
                     </div>
                 </div>
 
                 <!-- Charts -->
                 <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-                    <h3 class="font-bold text-slate-800 mb-4 flex items-center gap-2">
-                        <i data-lucide="bar-chart-2" class="w-5 h-5 text-indigo-500"></i>
-                        Volume Hebdomadaire
-                    </h3>
+                    <div class="flex justify-between items-center mb-6">
+                        <h3 class="font-bold text-slate-800 flex items-center gap-2">
+                            <i data-lucide="bar-chart-2" class="w-5 h-5 text-indigo-500"></i>
+                            Analyse Temporelle
+                        </h3>
+                        <!-- Period Selector for Chart -->
+                        <div class="bg-slate-100 p-1 rounded-lg flex text-[10px] font-bold">
+                            <button id="chart-btn-week" onclick="window.app?.toggleChart('week')" class="px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all">Semaine</button>
+                            <button id="chart-btn-month" onclick="window.app?.toggleChart('month')" class="px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all">Mois</button>
+                        </div>
+                    </div>
                     <div class="h-64 relative">
-                        <canvas id="weeklyChart"></canvas>
+                        <canvas id="mainChart"></canvas>
+                    </div>
+                </div>
+
+                <!-- Recent Activity / History Snippet -->
+                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                    <div class="flex justify-between items-center mb-4">
+                        <h3 class="font-bold text-slate-800 text-sm">Activité Récente</h3>
+                        <button onclick="window.app?.navigate('history')" class="text-xs font-bold text-indigo-600 hover:underline">Voir tout</button>
+                    </div>
+                    <div id="dashboard-history-preview" class="space-y-2">
+                        <!-- Populated via JS -->
                     </div>
                 </div>
             </div>
@@ -119,9 +173,9 @@
 
         <!-- VIEW: HISTORY -->
         <div id="view-history" class="view-section h-full flex flex-col section-hidden">
-            <div class="p-4 bg-white border-b border-slate-200 flex gap-4 overflow-x-auto shrink-0">
+            <div class="p-4 bg-white border-b border-slate-200 flex gap-4 overflow-x-auto shrink-0 items-center">
+                <label class="text-xs font-bold text-slate-500 uppercase">Date:</label>
                 <input type="date" id="history-date" class="bg-slate-100 border-none rounded-xl px-4 py-2 font-bold text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500">
-                <div id="history-sessions-tabs" class="flex gap-2"></div>
             </div>
             <div id="history-content" class="flex-1 overflow-y-auto p-4 custom-scrollbar space-y-3"></div>
         </div>
@@ -129,13 +183,15 @@
         <!-- VIEW: STUDENTS -->
         <div id="view-students" class="view-section h-full overflow-y-auto p-4 custom-scrollbar section-hidden">
             <div class="max-w-2xl mx-auto">
-                <div class="flex gap-2 mb-6">
-                    <input type="text" id="new-student-input" placeholder="Nouveau nom d'élève..." class="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium">
-                    <button onclick="window.app?.addStudent()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors">
-                        <i data-lucide="plus" class="w-5 h-5"></i>
-                    </button>
+                <div class="sticky top-0 bg-slate-50 pt-2 pb-6 z-10">
+                     <div class="flex gap-2">
+                        <input type="text" id="new-student-input" placeholder="Ajouter un élève..." class="flex-1 bg-white border border-slate-200 rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-indigo-500 font-medium shadow-sm">
+                        <button onclick="window.app?.addStudent()" class="bg-indigo-600 text-white px-6 py-3 rounded-xl font-bold shadow-lg shadow-indigo-200 hover:bg-indigo-700 transition-colors">
+                            <i data-lucide="plus" class="w-5 h-5"></i>
+                        </button>
+                    </div>
                 </div>
-                <div id="students-list-container" class="space-y-2"></div>
+                <div id="students-list-container" class="space-y-2 pb-10"></div>
             </div>
         </div>
 

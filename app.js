@@ -3,11 +3,12 @@ import { getFirestore, collection, doc, setDoc, getDoc } from "https://www.gstat
 
 // --- GLOBAL STATE ---
 window.appState = {
-    view: 'live',
+    view: 'stats', // Default view is now Stats (Dashboard)
     students: [],
     sessions: [],
     currentSessionId: new Date().toISOString().split('T')[0],
     activeTimes: {},
+    chartMode: 'week', // 'week' or 'month'
     db: null,
     isFirebaseReady: false
 };
@@ -79,7 +80,7 @@ window.app = {
         }
 
         // Initial Render
-        this.navigate('live');
+        this.navigate('stats'); // Force dashboard on start
         if (window.lucide) window.lucide.createIcons();
         
         // GLOBAL TICK LOOP (Runs every 1s)
@@ -282,7 +283,6 @@ window.app = {
     },
 
     updateLiveUI() {
-        // Mise à jour uniquement du DOM des temps
         const session = window.appState.sessions.find(x => x.id === window.appState.currentSessionId);
         if(!session) return;
         
@@ -297,15 +297,25 @@ window.app = {
             }
         });
         
-        // Mettre à jour le temps total en haut
+        // Update global time
         const totalLiveEl = document.getElementById('live-total-time');
         if(totalLiveEl) {
-             // Calcul optionnel du total global si nécessaire
+             let totalSec = 0;
+             Object.values(session.results).forEach(r => totalSec += (r.total || 0));
+             totalLiveEl.innerText = this.formatTime(totalSec);
         }
     },
 
     renderLive() {
         const container = document.getElementById('live-list');
+        const dateEl = document.getElementById('live-session-date');
+        
+        // Set date
+        if(dateEl) {
+            const today = new Date();
+            dateEl.innerText = today.toLocaleDateString('fr-FR');
+        }
+
         if (!container) return;
 
         const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
@@ -320,29 +330,30 @@ window.app = {
             const isActive = !!window.appState.activeTimes[s.id];
             const currentPassage = res.passages ? res.passages[res.passages.length - 1] : 0;
 
+            // Compact View HTML
             return `
-            <div class="bg-white p-3 rounded-2xl border transition-all flex items-center justify-between gap-3 ${isActive ? 'timer-active shadow-md' : 'border-slate-100'}">
+            <div class="bg-white p-2 rounded-xl border transition-all flex items-center justify-between gap-2 ${isActive ? 'timer-active shadow-md' : 'border-slate-100'}">
                 <div class="flex items-center gap-3 overflow-hidden flex-1">
-                    <div class="h-10 w-10 rounded-full flex items-center justify-center font-black text-xs shrink-0 ${isActive ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}">
+                    <div class="h-8 w-8 rounded-full flex items-center justify-center font-black text-[10px] shrink-0 ${isActive ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-400'}">
                         ${res.passages ? res.passages.length : 1}
                     </div>
                     <div class="min-w-0">
-                        <h4 class="font-bold text-sm truncate text-slate-800">${s.name}</h4>
-                        <p class="text-[10px] font-bold text-slate-400 uppercase">Total: ${this.formatTime(res.total)}</p>
+                        <h4 class="font-bold text-sm truncate text-slate-800 leading-tight">${s.name}</h4>
+                        <div class="flex items-center gap-2">
+                             <p class="text-[9px] font-bold text-slate-400 uppercase">Tot: ${this.formatTime(res.total)}</p>
+                        </div>
                     </div>
                 </div>
-                <div class="flex items-center gap-3">
-                    <div id="time-${s.id}" class="font-mono font-black text-xl tabular-nums w-16 text-right ${isActive ? 'text-indigo-600' : 'text-slate-300'}">
+                <div class="flex items-center gap-2">
+                    <div id="time-${s.id}" class="font-mono font-bold text-lg tabular-nums w-14 text-right ${isActive ? 'text-indigo-600' : 'text-slate-300'}">
                         ${this.formatTime(currentPassage)}
                     </div>
-                    <div class="flex gap-1">
-                        <button onclick="window.app.stepPassage('${s.id}')" class="h-10 w-10 rounded-xl bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-indigo-100 transition-colors">
-                            <i data-lucide="step-forward" class="w-4 h-4"></i>
-                        </button>
-                        <button onclick="window.app.toggleTimer('${s.id}')" class="timer-btn h-10 w-10 rounded-full border border-slate-200 flex items-center justify-center shadow-sm transition-all ${isActive ? '' : 'bg-white text-slate-600'}">
-                            <i data-lucide="${isActive ? 'pause' : 'play'}" class="w-4 h-4 ml-0.5"></i>
-                        </button>
-                    </div>
+                    <button onclick="window.app.stepPassage('${s.id}')" class="h-8 w-8 rounded-lg bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-indigo-100 transition-colors">
+                        <i data-lucide="step-forward" class="w-3 h-3"></i>
+                    </button>
+                    <button onclick="window.app.toggleTimer('${s.id}')" class="timer-btn h-8 w-8 rounded-full border border-slate-200 flex items-center justify-center shadow-sm transition-all ${isActive ? '' : 'bg-white text-slate-600'}">
+                        <i data-lucide="${isActive ? 'pause' : 'play'}" class="w-3 h-3 ml-0.5"></i>
+                    </button>
                 </div>
             </div>`;
         }).join('');
@@ -359,12 +370,12 @@ window.app = {
         }
 
         container.innerHTML = window.appState.students.map(s => `
-            <div class="flex items-center justify-between bg-white p-4 rounded-xl border border-slate-100 shadow-sm">
+            <div class="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
                 <div class="flex items-center gap-3">
                     <div class="h-8 w-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-bold text-xs">
                         ${s.name.charAt(0)}
                     </div>
-                    <span class="font-bold text-slate-700">${s.name}</span>
+                    <span class="font-bold text-slate-700 text-sm">${s.name}</span>
                 </div>
                 <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-2">
                     <i data-lucide="trash-2" class="w-4 h-4"></i>
@@ -374,69 +385,137 @@ window.app = {
         if (window.lucide) window.lucide.createIcons();
     },
 
+    toggleChart(mode) {
+        window.appState.chartMode = mode;
+        // Update buttons style
+        const btnWeek = document.getElementById('chart-btn-week');
+        const btnMonth = document.getElementById('chart-btn-month');
+        
+        if(mode === 'week') {
+            btnWeek.className = "px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all";
+            btnMonth.className = "px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all";
+        } else {
+            btnWeek.className = "px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all";
+            btnMonth.className = "px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all";
+        }
+        this.renderStats();
+    },
+
     renderStats() {
-        let total = 0;
-        let sessionsCount = window.appState.sessions.length;
-        let activeStudentCount = 0;
-        let bestStudent = { name: '-', time: 0 };
-        const studentTimes = {};
+        // Calculate Totals: Daily, Weekly, Monthly
+        const today = new Date().toISOString().split('T')[0];
+        const now = new Date();
+        const oneWeekAgo = new Date(); oneWeekAgo.setDate(now.getDate() - 7);
+        const currentMonthPrefix = today.substring(0, 7); // YYYY-MM
 
-        // Calculs Stats
+        let dailyTotal = 0;
+        let weeklyTotal = 0;
+        let monthlyTotal = 0;
+        
+        // Active Students Logic
+        const allStudentTimes = {};
+
         window.appState.sessions.forEach(sess => {
+            const sDate = new Date(sess.id);
+            let sessTotal = 0;
+            
+            // Calculate session total
             Object.entries(sess.results).forEach(([sid, r]) => {
-                if(r.total > 0) {
-                    total += r.total;
-                    studentTimes[sid] = (studentTimes[sid] || 0) + r.total;
-                }
+                const t = r.total || 0;
+                sessTotal += t;
+                if(t > 0) allStudentTimes[sid] = (allStudentTimes[sid] || 0) + t;
             });
+
+            // Daily
+            if (sess.id === today) dailyTotal += sessTotal;
+
+            // Monthly (Simple string check)
+            if (sess.id.startsWith(currentMonthPrefix)) monthlyTotal += sessTotal;
+
+            // Weekly (Date diff)
+            if (sDate >= oneWeekAgo && sDate <= now) weeklyTotal += sessTotal;
         });
 
-        activeStudentCount = Object.keys(studentTimes).length;
-        
-        // Trouver le meilleur
-        Object.entries(studentTimes).forEach(([sid, time]) => {
-            if(time > bestStudent.time) {
-                const s = window.appState.students.find(st => st.id === sid);
-                bestStudent = { name: s ? s.name : sid, time: time };
-            }
-        });
+        // Update DOM Cards
+        const elDaily = document.getElementById('stat-daily-hours');
+        if(elDaily) elDaily.innerText = (dailyTotal / 3600).toFixed(1) + 'h';
 
-        const elTotal = document.getElementById('stat-total-hours');
-        if(elTotal) elTotal.innerText = (total / 3600).toFixed(1) + 'h';
-        
-        const elSess = document.getElementById('stat-total-sessions');
-        if(elSess) elSess.innerText = sessionsCount;
+        const elWeekly = document.getElementById('stat-weekly-hours');
+        if(elWeekly) elWeekly.innerText = (weeklyTotal / 3600).toFixed(1) + 'h';
+
+        const elMonthly = document.getElementById('stat-monthly-hours');
+        if(elMonthly) elMonthly.innerText = (monthlyTotal / 3600).toFixed(1) + 'h';
 
         const elActive = document.getElementById('stat-active-students');
-        if(elActive) elActive.innerText = activeStudentCount;
+        if(elActive) elActive.innerText = Object.keys(allStudentTimes).length;
 
-        const elBest = document.getElementById('stat-top-perf');
-        if(elBest) elBest.innerText = bestStudent.name;
-
-        // ChartJS FIX: Destroy old instance
-        const ctx = document.getElementById('weeklyChart');
-        if (ctx && window.Chart) {
-            if (window.myChart instanceof Chart) {
-                window.myChart.destroy();
+        // Recent Activity (Preview)
+        const previewContainer = document.getElementById('dashboard-history-preview');
+        if(previewContainer) {
+            const recentSessions = [...window.appState.sessions].sort((a,b) => b.id.localeCompare(a.id)).slice(0, 3);
+            if(recentSessions.length === 0) {
+                previewContainer.innerHTML = '<div class="text-slate-400 text-xs italic">Aucune activité récente.</div>';
+            } else {
+                previewContainer.innerHTML = recentSessions.map(s => {
+                    let sTotal = 0;
+                    Object.values(s.results).forEach(r => sTotal += (r.total || 0));
+                    return `
+                    <div class="flex justify-between items-center text-sm border-b border-slate-50 last:border-0 py-2">
+                        <span class="text-slate-600 font-medium">${s.id}</span>
+                        <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${(sTotal/3600).toFixed(1)}h</span>
+                    </div>`;
+                }).join('');
             }
+        }
+
+        // Chart Logic
+        const ctx = document.getElementById('mainChart');
+        if (ctx && window.Chart) {
+            if (window.myChart instanceof Chart) window.myChart.destroy();
             
-            // Préparation données graph
-            const sortedStudents = Object.entries(studentTimes)
-                .sort(([,a], [,b]) => b - a)
-                .slice(0, 7);
+            let labels = [];
+            let dataPoints = [];
+            
+            if (window.appState.chartMode === 'week') {
+                // Last 7 days names
+                for(let i=6; i>=0; i--) {
+                    const d = new Date(); d.setDate(now.getDate() - i);
+                    const dateStr = d.toISOString().split('T')[0];
+                    const dayName = d.toLocaleDateString('fr-FR', { weekday: 'short' });
+                    labels.push(dayName);
+                    
+                    const sess = window.appState.sessions.find(s => s.id === dateStr);
+                    let val = 0;
+                    if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
+                    dataPoints.push(Math.floor(val/60)); // Minutes
+                }
+            } else {
+                // Last 30 days (grouped by weeks roughly or just days if chart allows)
+                // Let's do last 4 weeks approx for simplicity in bar chart, or just last 12 days to fit
+                // User asked for "Month". Let's show last 15 days to keep it readable on mobile
+                for(let i=14; i>=0; i--) {
+                    const d = new Date(); d.setDate(now.getDate() - i);
+                    const dateStr = d.toISOString().split('T')[0];
+                    const dayNum = d.getDate();
+                    labels.push(dayNum);
+                    
+                    const sess = window.appState.sessions.find(s => s.id === dateStr);
+                    let val = 0;
+                    if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
+                    dataPoints.push(Math.floor(val/60));
+                }
+            }
 
             window.myChart = new Chart(ctx, {
                 type: 'bar',
                 data: {
-                    labels: sortedStudents.map(([sid]) => {
-                        const s = window.appState.students.find(st => st.id === sid);
-                        return s ? s.name : sid.substring(0,4);
-                    }),
+                    labels: labels,
                     datasets: [{
-                        label: 'Secondes',
-                        data: sortedStudents.map(([,t]) => t),
+                        label: 'Minutes',
+                        data: dataPoints,
                         backgroundColor: '#4f46e5',
-                        borderRadius: 6
+                        borderRadius: 4,
+                        barThickness: window.appState.chartMode === 'week' ? 20 : 10
                     }]
                 },
                 options: {
@@ -470,8 +549,8 @@ window.app = {
             if (!res || res.total === 0) return '';
             
             return `
-            <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center">
-                <span class="font-bold text-slate-700">${s.name}</span>
+            <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+                <span class="font-bold text-slate-700 text-sm">${s.name}</span>
                 <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded text-xs">
                     ${this.formatTime(res.total)}
                 </span>

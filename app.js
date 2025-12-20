@@ -233,6 +233,23 @@ window.app = {
         this.renderLive(); // Refresh buttons immediately
     },
 
+    // --- NEW FUNCTION: Reset student session ---
+    resetStudentSession(studentId) {
+        if(!confirm("Réinitialiser le temps de cet élève pour cette session ?")) return;
+        
+        // Stop timer if running
+        if (window.appState.activeTimes[studentId]) {
+            delete window.appState.activeTimes[studentId];
+        }
+
+        const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
+        if(session && session.results[studentId]) {
+            session.results[studentId] = { total: 0, passages: [] };
+            this.saveLocal();
+            this.renderLive();
+        }
+    },
+
     stepPassage(studentId) {
         if (window.appState.activeTimes[studentId]) {
             this.updateStudentSessionTime(studentId);
@@ -330,7 +347,7 @@ window.app = {
             const isActive = !!window.appState.activeTimes[s.id];
             const currentPassage = res.passages ? res.passages[res.passages.length - 1] : 0;
 
-            // Compact View HTML
+            // Compact View HTML with Reset Button
             return `
             <div class="bg-white p-2 rounded-xl border transition-all flex items-center justify-between gap-2 ${isActive ? 'timer-active shadow-md' : 'border-slate-100'}">
                 <div class="flex items-center gap-3 overflow-hidden flex-1">
@@ -353,6 +370,9 @@ window.app = {
                     </button>
                     <button onclick="window.app.toggleTimer('${s.id}')" class="timer-btn h-8 w-8 rounded-full border border-slate-200 flex items-center justify-center shadow-sm transition-all ${isActive ? '' : 'bg-white text-slate-600'}">
                         <i data-lucide="${isActive ? 'pause' : 'play'}" class="w-3 h-3 ml-0.5"></i>
+                    </button>
+                    <button onclick="window.app.resetStudentSession('${s.id}')" class="h-8 w-8 rounded-lg bg-red-50 text-red-400 flex items-center justify-center hover:bg-red-100 transition-colors ml-1">
+                        <i data-lucide="trash-2" class="w-3 h-3"></i>
                     </button>
                 </div>
             </div>`;
@@ -412,29 +432,51 @@ window.app = {
         let weeklyTotal = 0;
         let monthlyTotal = 0;
         
-        // Active Students Logic
+        let weeklyStudentTimes = {}; // StudentId -> Seconds
+        let weeklyActiveCountSet = new Set();
+        let monthlyActiveCountSet = new Set();
+        
+        // Global Active Students Logic (kept for legacy card "Total Active")
         const allStudentTimes = {};
 
         window.appState.sessions.forEach(sess => {
             const sDate = new Date(sess.id);
             let sessTotal = 0;
-            
-            // Calculate session total
+            const isThisWeek = (sDate >= oneWeekAgo && sDate <= now);
+            const isThisMonth = sess.id.startsWith(currentMonthPrefix);
+
+            // Calculate session totals and specific period totals
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
                 sessTotal += t;
-                if(t > 0) allStudentTimes[sid] = (allStudentTimes[sid] || 0) + t;
+                
+                if(t > 0) {
+                    allStudentTimes[sid] = (allStudentTimes[sid] || 0) + t;
+                    
+                    if(isThisWeek) {
+                         weeklyActiveCountSet.add(sid);
+                         weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
+                    }
+                    if(isThisMonth) {
+                        monthlyActiveCountSet.add(sid);
+                    }
+                }
             });
 
             // Daily
             if (sess.id === today) dailyTotal += sessTotal;
-
-            // Monthly (Simple string check)
-            if (sess.id.startsWith(currentMonthPrefix)) monthlyTotal += sessTotal;
-
-            // Weekly (Date diff)
-            if (sDate >= oneWeekAgo && sDate <= now) weeklyTotal += sessTotal;
+            // Monthly
+            if (isThisMonth) monthlyTotal += sessTotal;
+            // Weekly
+            if (isThisWeek) weeklyTotal += sessTotal;
         });
+
+        // CALCULATE AVERAGES
+        const weekActiveCount = weeklyActiveCountSet.size || 1; // avoid division by zero
+        const monthActiveCount = monthlyActiveCountSet.size || 1;
+        
+        const avgWeek = weeklyTotal / weekActiveCount;
+        const avgMonth = monthlyTotal / monthActiveCount;
 
         // Update DOM Cards
         const elDaily = document.getElementById('stat-daily-hours');
@@ -445,24 +487,37 @@ window.app = {
 
         const elMonthly = document.getElementById('stat-monthly-hours');
         if(elMonthly) elMonthly.innerText = (monthlyTotal / 3600).toFixed(1) + 'h';
+        
+        // New Averages
+        const elAvgWeek = document.getElementById('stat-avg-week');
+        if(elAvgWeek) elAvgWeek.innerText = (avgWeek / 3600).toFixed(1) + 'h';
+        
+        const elAvgMonth = document.getElementById('stat-avg-month');
+        if(elAvgMonth) elAvgMonth.innerText = (avgMonth / 3600).toFixed(1) + 'h';
 
         const elActive = document.getElementById('stat-active-students');
         if(elActive) elActive.innerText = Object.keys(allStudentTimes).length;
 
-        // Recent Activity (Preview)
-        const previewContainer = document.getElementById('dashboard-history-preview');
-        if(previewContainer) {
-            const recentSessions = [...window.appState.sessions].sort((a,b) => b.id.localeCompare(a.id)).slice(0, 3);
-            if(recentSessions.length === 0) {
-                previewContainer.innerHTML = '<div class="text-slate-400 text-xs italic">Aucune activité récente.</div>';
+        // TOP 5 STUDENTS (WEEK)
+        const topContainer = document.getElementById('dashboard-top-students');
+        if(topContainer) {
+            const sortedStudents = Object.entries(weeklyStudentTimes)
+                .sort(([, a], [, b]) => b - a)
+                .slice(0, 5);
+            
+            if(sortedStudents.length === 0) {
+                topContainer.innerHTML = '<div class="text-slate-400 text-xs italic">Aucune activité cette semaine.</div>';
             } else {
-                previewContainer.innerHTML = recentSessions.map(s => {
-                    let sTotal = 0;
-                    Object.values(s.results).forEach(r => sTotal += (r.total || 0));
+                topContainer.innerHTML = sortedStudents.map(([sid, time], index) => {
+                    const student = window.appState.students.find(s => s.id === sid);
+                    const name = student ? student.name : sid;
                     return `
                     <div class="flex justify-between items-center text-sm border-b border-slate-50 last:border-0 py-2">
-                        <span class="text-slate-600 font-medium">${s.id}</span>
-                        <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${(sTotal/3600).toFixed(1)}h</span>
+                        <div class="flex items-center gap-3">
+                             <div class="w-6 h-6 rounded-full bg-indigo-50 text-indigo-600 font-bold text-xs flex items-center justify-center">${index + 1}</div>
+                             <span class="text-slate-700 font-bold">${name}</span>
+                        </div>
+                        <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${this.formatTime(time)}</span>
                     </div>`;
                 }).join('');
             }
@@ -490,9 +545,7 @@ window.app = {
                     dataPoints.push(Math.floor(val/60)); // Minutes
                 }
             } else {
-                // Last 30 days (grouped by weeks roughly or just days if chart allows)
-                // Let's do last 4 weeks approx for simplicity in bar chart, or just last 12 days to fit
-                // User asked for "Month". Let's show last 15 days to keep it readable on mobile
+                // Last 15 days
                 for(let i=14; i>=0; i--) {
                     const d = new Date(); d.setDate(now.getDate() - i);
                     const dateStr = d.toISOString().split('T')[0];

@@ -1,5 +1,6 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
 import { getFirestore, collection, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
+import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 // --- GLOBAL STATE ---
 window.appState = {
@@ -63,16 +64,35 @@ window.app = {
             this.saveLocal();
         }
 
-        // Firebase Init
+        // Firebase Init (Secure Mode)
         if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
             try {
                 const fbApp = initializeApp(window.FIREBASE_CONFIG);
                 window.appState.db = getFirestore(fbApp);
-                window.appState.isFirebaseReady = true;
-                this.updateSyncStatus('online');
-                await this.syncFromFirebase();
+                const auth = getAuth(fbApp);
+
+                this.updateSyncStatus('syncing'); // Show connecting state
+
+                // Listen for successful login
+                onAuthStateChanged(auth, async (user) => {
+                    if (user) {
+                        console.log("🔒 Secured Connection Established (UID: " + user.uid + ")");
+                        window.appState.isFirebaseReady = true;
+                        this.updateSyncStatus('online');
+                        await this.syncFromFirebase();
+                    } else {
+                        // Logged out
+                        window.appState.isFirebaseReady = false;
+                        this.updateSyncStatus('offline');
+                    }
+                });
+
+                // Attempt Anonymous Login
+                await signInAnonymously(auth);
+
             } catch (e) {
                 console.error("Firebase Init Error:", e);
+                // Si l'auth échoue (ex: pas activé dans la console), on passe en erreur mais l'app reste utilisable localement
                 this.updateSyncStatus('error');
             }
         } else {
@@ -148,7 +168,7 @@ window.app = {
     },
 
     async saveToFirebase() {
-        if (!window.appState.db) return;
+        if (!window.appState.db || !window.appState.isFirebaseReady) return;
         this.updateSyncStatus('syncing');
         try {
             await setDoc(doc(window.appState.db, "data", "students"), { list: window.appState.students });
@@ -161,7 +181,7 @@ window.app = {
     },
 
     async syncFromFirebase() {
-        if (!window.appState.db) return;
+        if (!window.appState.db || !window.appState.isFirebaseReady) return;
         try {
             const snap = await getDoc(doc(window.appState.db, "data", "students"));
             if (snap.exists()) {
@@ -181,15 +201,15 @@ window.app = {
 
         if (status === 'online') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>`;
-            text.innerText = "ONLINE";
+            text.innerText = "ONLINE (SECURE)";
             text.className = "text-[10px] text-green-600 font-bold uppercase tracking-wider";
         } else if (status === 'syncing') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>`;
-            text.innerText = "SAVING...";
+            text.innerText = "CONNECTING...";
             text.className = "text-[10px] text-blue-600 font-bold uppercase tracking-wider";
         } else if (status === 'error') {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>`;
-            text.innerText = "ERROR";
+            text.innerText = "AUTH ERROR";
             text.className = "text-[10px] text-red-500 font-bold uppercase tracking-wider";
         } else {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>`;

@@ -1,12 +1,11 @@
-// --- CONFIGURATION FIREBASE ---
-// Ne mettez pas de "const" ou "let" ici pour éviter les erreurs de redeclaration.
-// Assignez directement à window.FIREBASE_CONFIG.
 
+// --- CONFIGURATION FIREBASE ---
+// Configuration spécifique au projet "optimisation-coaching"
 window.FIREBASE_CONFIG = {
-  // apiKey: "VOTRE_API_KEY_ICI",
-  // authDomain: "...",
-  // projectId: "...",
-  // storageBucket: "...",
-  // messagingSenderId: "...",
-  // appId: "..."
+  apiKey: "AIzaSyBD4K7pFtQDyhEqP1H1SowvFnpm0xLHbRE",
+  authDomain: "optimisation-coaching.firebaseapp.com",
+  projectId: "optimisation-coaching",
+  storageBucket: "optimisation-coaching.firebasestorage.app",
+  messagingSenderId: "984694943418",
+  appId: "1:984694943418:web:23aa267c4cd974804e5c83"
 };

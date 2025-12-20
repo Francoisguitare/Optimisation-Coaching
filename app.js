@@ -11,7 +11,9 @@ window.appState = {
     activeTimes: {},
     chartMode: 'week',
     db: null,
-    isFirebaseReady: false
+    auth: null,
+    isFirebaseReady: false,
+    lastError: null
 };
 
 // --- DATA RECOVERY ---
@@ -44,62 +46,92 @@ window.app = {
         if (!todaySession) {
             todaySession = { id: window.appState.currentSessionId, date: new Date().toISOString(), results: {} };
             window.appState.sessions.push(todaySession);
-            this.saveLocal(); // Save immediately to create structure
+            this.saveLocal();
         }
 
-        // 2. Firebase Init (Secure Mode)
-        if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
-            
-            // Check protocol for debugging
-            if (window.location.protocol === 'file:') {
-                alert("ATTENTION: Firebase ne fonctionne pas en ouvrant le fichier directement (file://). Vous devez utiliser un serveur local (http://localhost) ou héberger le site.");
-            }
-
-            try {
-                const fbApp = initializeApp(window.FIREBASE_CONFIG);
-                window.appState.db = getFirestore(fbApp);
-                const auth = getAuth(fbApp);
-
-                this.updateSyncStatus('syncing');
-
-                onAuthStateChanged(auth, async (user) => {
-                    if (user) {
-                        console.log("🔒 Secured Connection Established (UID: " + user.uid + ")");
-                        window.appState.isFirebaseReady = true;
-                        this.updateSyncStatus('online');
-                        // Force download on connect
-                        await this.syncFromFirebase(true); 
-                    } else {
-                        window.appState.isFirebaseReady = false;
-                        this.updateSyncStatus('offline');
-                    }
-                });
-
-                await signInAnonymously(auth);
-
-            } catch (e) {
-                console.error("Firebase Init Error:", e);
-                this.updateSyncStatus('error');
-                
-                // DIAGNOSTIC ALERT FOR USER
-                if (e.code === 'auth/operation-not-allowed') {
-                    alert("ERREUR CONFIGURATION: Vous n'avez pas activé l'authentification Anonyme dans la console Firebase (Onglet Authentication > Sign-in method).");
-                } else if (e.code === 'auth/network-request-failed') {
-                    alert("ERREUR RÉSEAU: Vérifiez votre connexion internet.");
-                } else if (e.message && e.message.includes("domain")) {
-                    alert("DOMAINE NON AUTORISÉ: Allez dans Firebase Console > Authentication > Settings > Authorized Domains et ajoutez le domaine ou l'IP que vous utilisez.");
-                }
-            }
-        } else {
-            console.warn("Firebase Config missing.");
-            this.updateSyncStatus('offline');
-        }
-
-        // Initial Render
+        // 2. Initial Render
         this.navigate('stats');
         if (window.lucide) window.lucide.createIcons();
         
+        // 3. Status Debug Click
+        const statusContainer = document.getElementById('sync-status-text').parentElement;
+        if(statusContainer) {
+            statusContainer.style.cursor = 'pointer';
+            statusContainer.onclick = () => this.retryConnection();
+        }
+
+        // 4. Connect Firebase
+        await this.connectFirebase();
+
+        // 5. Start Tick
         setInterval(() => { this.tick(); }, 1000);
+    },
+
+    async connectFirebase() {
+        if (!window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.apiKey) {
+            console.warn("Firebase Config missing.");
+            this.updateSyncStatus('error', "CONFIG MANQUANTE");
+            return;
+        }
+
+        if (window.location.protocol === 'file:') {
+            this.updateSyncStatus('offline', "MODE FICHIER (OFFLINE)");
+            // On ne bloque pas l'appli, mais on prévient
+            return;
+        }
+
+        try {
+            this.updateSyncStatus('syncing');
+            
+            // Initialize only if not already done
+            if (!window.appState.db) {
+                const fbApp = initializeApp(window.FIREBASE_CONFIG);
+                window.appState.db = getFirestore(fbApp);
+                window.appState.auth = getAuth(fbApp);
+            }
+
+            // Auth Listener
+            onAuthStateChanged(window.appState.auth, async (user) => {
+                if (user) {
+                    console.log("🔒 Secured Connection Established (UID: " + user.uid + ")");
+                    window.appState.isFirebaseReady = true;
+                    this.updateSyncStatus('online');
+                    await this.syncFromFirebase(true); 
+                } else {
+                    window.appState.isFirebaseReady = false;
+                }
+            });
+
+            // Trigger Login
+            await signInAnonymously(window.appState.auth);
+
+        } catch (e) {
+            console.error("Firebase Init Error:", e);
+            window.appState.lastError = e;
+            
+            let shortError = "ERREUR";
+            if (e.code === 'auth/operation-not-allowed') {
+                shortError = "ACTIVER AUTH !"; // Message spécifique
+                alert("ATTENTION : Vous devez activer l'authentification ANONYME dans la console Firebase (Menu Authentication > Sign-in method).");
+            }
+            else if (e.code === 'auth/network-request-failed') shortError = "PAS D'INTERNET";
+            else if (e.message && e.message.includes("domain")) shortError = "DOMAINE NON AUTORISÉ";
+            
+            this.updateSyncStatus('error', shortError);
+        }
+    },
+
+    async retryConnection() {
+        if (window.appState.isFirebaseReady) {
+            alert("Tout fonctionne ! Vous êtes connecté et synchronisé.");
+        } else if (window.appState.lastError) {
+            const e = window.appState.lastError;
+            alert(`ERREUR DÉTECTÉE :\n\nCode: ${e.code || 'Inconnu'}\nMessage: ${e.message}\n\nSOLUTIONS:\n1. Activez "Anonyme" dans Firebase Authentication.\n2. Ajoutez votre IP/Domaine dans Firebase Auth Settings.`);
+            this.connectFirebase();
+        } else {
+            alert("Mode Fichier détecté. Utilisez un serveur local (Live Server) pour synchroniser.");
+            this.connectFirebase();
+        }
     },
 
     tick() {
@@ -154,7 +186,8 @@ window.app = {
             this.updateSyncStatus('online');
         } catch (e) {
             console.error(e);
-            this.updateSyncStatus('error');
+            this.updateSyncStatus('error', "ERREUR SAUVEGARDE");
+            window.appState.lastError = e;
         }
     },
 
@@ -168,8 +201,6 @@ window.app = {
 
             if (snapStudents.exists()) {
                 const remoteList = snapStudents.data().list || [];
-                // Simple merge logic: if remote has more or different data, take it.
-                // For this prototype, we prioritize Remote data on load to ensure sync.
                 if (forceUpdate || remoteList.length > 0) {
                      window.appState.students = remoteList;
                      hasChanges = true;
@@ -186,40 +217,40 @@ window.app = {
 
             if (hasChanges) {
                 console.log("📥 Data synchronized from cloud");
-                this.saveLocal(); // Update local storage
-                // Re-render current view
+                this.saveLocal();
                 this.navigate(window.appState.view);
             }
 
         } catch (e) { 
             console.error("Sync Error:", e);
+            window.appState.lastError = e;
             if(e.code === 'permission-denied') {
-                alert("PERMISSION REFUSÉE: Vérifiez vos Règles de sécurité Firestore.");
+                this.updateSyncStatus('error', "RÈGLES REFUSÉES");
             }
         }
     },
 
-    updateSyncStatus(status) {
+    updateSyncStatus(status, labelOverride = null) {
         const dot = document.getElementById('sync-status-dot');
         const text = document.getElementById('sync-status-text');
         if (!dot || !text) return;
 
         if (status === 'online') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-green-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-green-500"></span>`;
-            text.innerText = "ONLINE";
+            text.innerText = labelOverride || "ONLINE";
             text.className = "text-[10px] text-green-600 font-bold uppercase tracking-wider";
         } else if (status === 'syncing') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>`;
-            text.innerText = "SYNC...";
+            text.innerText = labelOverride || "CONNEXION...";
             text.className = "text-[10px] text-blue-600 font-bold uppercase tracking-wider";
         } else if (status === 'error') {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>`;
-            text.innerText = "ERREUR";
-            text.className = "text-[10px] text-red-500 font-bold uppercase tracking-wider";
+            text.innerText = labelOverride || "ERREUR (cliquer)";
+            text.className = "text-[10px] text-red-500 font-bold uppercase tracking-wider cursor-pointer underline";
         } else {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>`;
-            text.innerText = "LOCAL";
-            text.className = "text-[10px] text-slate-400 font-bold uppercase tracking-wider";
+            text.innerText = labelOverride || "LOCAL (cliquer)";
+            text.className = "text-[10px] text-slate-400 font-bold uppercase tracking-wider cursor-pointer";
         }
     },
 
@@ -236,7 +267,7 @@ window.app = {
         });
         window.appState.students.sort((a,b) => a.name.localeCompare(b.name));
         input.value = '';
-        this.saveLocal(); // Triggers Firebase Save
+        this.saveLocal();
         this.renderStudents();
     },
 

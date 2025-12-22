@@ -42,11 +42,10 @@
                 <h1 class="font-black text-lg leading-tight text-slate-800 hidden md:block">
                     CHRONO<span class="text-indigo-600">TRACK</span>
                 </h1>
-                <div class="flex items-center gap-1.5">
-                    <span id="sync-status-dot" class="relative flex h-2 w-2">
-                        <span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>
-                    </span>
-                    <p id="sync-status-text" class="text-[10px] text-slate-500 font-bold uppercase tracking-wider">Loading...</p>
+                <!-- NOUVEL INDICATEUR DE SAUVEGARDE -->
+                <div id="save-indicator" class="flex items-center gap-1.5 transition-colors duration-300">
+                    <i id="save-icon" data-lucide="cloud-off" class="w-4 h-4 text-slate-300"></i>
+                    <p id="save-text" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">OFFLINE</p>
                 </div>
             </div>
         </div>

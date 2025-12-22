@@ -3,7 +3,6 @@ import { getFirestore, collection, doc, setDoc, getDoc } from "https://www.gstat
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
 // --- UTILS ---
-// Récupère la date locale format YYYY-MM-DD (corrige le bug de décalage horaire UTC)
 function getLocalDateString() {
     const d = new Date();
     const offset = d.getTimezoneOffset() * 60000;
@@ -15,13 +14,14 @@ window.appState = {
     view: 'stats',
     students: [],
     sessions: [],
-    currentSessionId: getLocalDateString(), // Utilise la date locale corrigée
+    currentSessionId: getLocalDateString(),
     activeTimes: {},
     chartMode: 'week',
     db: null,
     auth: null,
     isFirebaseReady: false,
-    lastError: null
+    lastError: null,
+    lastAutoSave: 0
 };
 
 // --- DATA RECOVERY ---
@@ -44,29 +44,25 @@ function recoverData() {
 // --- APP LOGIC ---
 window.app = {
     async init() {
-        // 1. Load Local Data First
+        // 1. Load Local Data
         const data = recoverData();
         window.appState.students = data.students;
         window.appState.sessions = data.sessions;
         
-        // Check Date on Init (in case app was kept open overnight)
+        // 2. Setup Session
         window.appState.currentSessionId = getLocalDateString();
-        
-        // Initial Session Check
         this.ensureCurrentSessionExists();
 
-        // 2. Initial Render
+        // 3. Render
         this.navigate('stats');
         if (window.lucide) window.lucide.createIcons();
         
-        // 3. Status Debug Click
+        // 4. Connect Firebase
         const statusContainer = document.getElementById('sync-status-text').parentElement;
         if(statusContainer) {
             statusContainer.style.cursor = 'pointer';
             statusContainer.onclick = () => this.retryConnection();
         }
-
-        // 4. Connect Firebase
         await this.connectFirebase();
 
         // 5. Start Tick
@@ -79,7 +75,7 @@ window.app = {
             console.log("Creating new session for today:", window.appState.currentSessionId);
             todaySession = { id: window.appState.currentSessionId, date: new Date().toISOString(), results: {} };
             window.appState.sessions.push(todaySession);
-            this.saveLocal();
+            this.saveLocal(false); // Save locally only initially
         }
         return todaySession;
     },
@@ -121,45 +117,41 @@ window.app = {
         } catch (e) {
             console.error("Firebase Init Error:", e);
             window.appState.lastError = e;
-            
-            let shortError = "ERREUR";
-            if (e.code === 'auth/operation-not-allowed') {
-                shortError = "ACTIVER AUTH !";
-                alert("ATTENTION : Vous devez activer l'authentification ANONYME dans la console Firebase (Menu Authentication > Sign-in method).");
-            }
-            else if (e.code === 'auth/network-request-failed') shortError = "PAS D'INTERNET";
-            else if (e.message && e.message.includes("domain")) shortError = "DOMAINE NON AUTORISÉ";
-            
-            this.updateSyncStatus('error', shortError);
+            this.updateSyncStatus('error', "ERREUR CONNEXION");
         }
     },
 
     async retryConnection() {
         if (window.appState.isFirebaseReady) {
-            alert("Tout fonctionne ! Vous êtes connecté et synchronisé.");
-        } else if (window.appState.lastError) {
-            const e = window.appState.lastError;
-            alert(`ERREUR DÉTECTÉE :\n\nCode: ${e.code || 'Inconnu'}\nMessage: ${e.message}\n\nSOLUTIONS:\n1. Activez "Anonyme" dans Firebase Authentication.\n2. Ajoutez votre IP/Domaine dans Firebase Auth Settings.`);
-            this.connectFirebase();
+            alert("Connecté et synchronisé.");
+            this.syncFromFirebase(true);
         } else {
-            alert("Mode Fichier détecté. Utilisez un serveur local (Live Server) pour synchroniser.");
             this.connectFirebase();
         }
     },
 
     tick() {
-        // Check for day change while app is running
         const nowId = getLocalDateString();
+        // Day change check
         if (nowId !== window.appState.currentSessionId) {
             window.appState.currentSessionId = nowId;
             this.ensureCurrentSessionExists();
-            this.renderLive(); // Refresh UI for new day
+            this.renderLive();
         }
 
         const activeIds = Object.keys(window.appState.activeTimes);
         if (activeIds.length > 0) {
+            // Update active timers in memory
             activeIds.forEach(sid => { this.updateStudentSessionTime(sid); });
+            
+            // Auto-Save to Cloud every 10 seconds if active
+            const now = Date.now();
+            if (now - window.appState.lastAutoSave > 10000) {
+                this.saveToFirebase();
+                window.appState.lastAutoSave = now;
+            }
         }
+
         if (window.appState.view === 'live') {
             this.updateLiveUI();
         }
@@ -189,26 +181,29 @@ window.app = {
         if (window.lucide) window.lucide.createIcons();
     },
 
-    saveLocal() {
+    // Save Local Storage AND Cloud
+    saveLocal(pushToCloud = true) {
         localStorage.setItem('chrono_track_students', JSON.stringify(window.appState.students));
         localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
         
-        if (window.appState.isFirebaseReady) {
+        if (pushToCloud && window.appState.isFirebaseReady) {
             this.saveToFirebase();
         }
     },
 
     async saveToFirebase() {
         if (!window.appState.db || !window.appState.isFirebaseReady) return;
-        this.updateSyncStatus('syncing');
+        
+        // Show subtle sync indicator if needed, but avoid flickering
+        // this.updateSyncStatus('syncing'); 
+        
         try {
             await setDoc(doc(window.appState.db, "data", "students"), { list: window.appState.students });
             await setDoc(doc(window.appState.db, "data", "sessions"), { list: window.appState.sessions });
             this.updateSyncStatus('online');
         } catch (e) {
-            console.error(e);
-            this.updateSyncStatus('error', "ERREUR SAUVEGARDE");
-            window.appState.lastError = e;
+            console.error("Save Error:", e);
+            this.updateSyncStatus('error', "ERREUR SAVE");
         }
     },
 
@@ -220,46 +215,79 @@ window.app = {
             
             let hasChanges = false;
 
-            // SYNC STUDENTS
+            // --- 1. SYNC STUDENTS ---
             if (snapStudents.exists()) {
                 const remoteList = snapStudents.data().list || [];
-                // IMPORTANT: Ne pas écraser les données locales par une liste vide si on a déjà des élèves
                 if (remoteList.length > 0) {
                      window.appState.students = remoteList;
                      hasChanges = true;
                 } else if (window.appState.students.length > 0) {
-                    // Si Cloud vide mais Local plein -> On envoie Local vers Cloud
-                    console.log("Cloud vide, Local plein -> Sauvegarde vers Cloud");
-                    this.saveToFirebase();
+                    this.saveToFirebase(); // Init Cloud
                 }
             } else if (window.appState.students.length > 0) {
-                // Pas de doc Cloud, mais Local plein -> On crée
+                this.saveToFirebase(); // Init Cloud
+            }
+
+            // --- 2. SYNC SESSIONS (SMART MERGE) ---
+            if (snapSessions.exists()) {
+                const remoteSessions = snapSessions.data().list || [];
+                const todayId = window.appState.currentSessionId;
+                
+                // Get our local version of today
+                const localTodaySession = window.appState.sessions.find(s => s.id === todayId);
+                
+                let mergedSessions = [...remoteSessions];
+                
+                // Check if Cloud has today's session
+                const remoteTodayIndex = mergedSessions.findIndex(s => s.id === todayId);
+
+                if (localTodaySession) {
+                    if (remoteTodayIndex !== -1) {
+                        // CONFLICT DETECTED: Both have today's session.
+                        const remoteTodaySession = mergedSessions[remoteTodayIndex];
+                        
+                        // Calculate total time to determine which one is "empty"
+                        const localTotal = Object.values(localTodaySession.results || {}).reduce((sum, r) => sum + (r.total||0), 0);
+                        const remoteTotal = Object.values(remoteTodaySession.results || {}).reduce((sum, r) => sum + (r.total||0), 0);
+
+                        console.log(`SYNC CONFLICT: Local=${localTotal}s vs Remote=${remoteTotal}s`);
+
+                        if (localTotal === 0 && remoteTotal > 0) {
+                            // CASE: New Device or Cache Cleared. Local is empty, Cloud has data.
+                            // -> TRUST CLOUD.
+                            console.log("-> Accepting Cloud Data (Local is empty)");
+                            mergedSessions[remoteTodayIndex] = remoteTodaySession;
+                        } else {
+                            // CASE: Active Device. Local has data (or both are 0). 
+                            // -> TRUST LOCAL (Assume we are the active writer).
+                            console.log("-> Keeping Local Data (Active Session)");
+                            mergedSessions[remoteTodayIndex] = localTodaySession;
+                            // Mark for push
+                            setTimeout(() => this.saveToFirebase(), 1000);
+                        }
+                    } else {
+                        // Cloud doesn't have today. Append local.
+                        mergedSessions.push(localTodaySession);
+                        setTimeout(() => this.saveToFirebase(), 1000);
+                    }
+                }
+
+                window.appState.sessions = mergedSessions;
+                hasChanges = true;
+            } else if (window.appState.sessions.length > 0) {
                 this.saveToFirebase();
             }
 
-            // SYNC SESSIONS
-            if (snapSessions.exists()) {
-                const remoteSessions = snapSessions.data().list || [];
-                if (forceUpdate || remoteSessions.length > 0) {
-                    // Pour les sessions, on merge ou on prend le plus récent ?
-                    // Simplification: on prend le cloud s'il y a du contenu
-                    window.appState.sessions = remoteSessions;
-                    hasChanges = true;
-                }
-            }
-
             if (hasChanges) {
-                console.log("📥 Data synchronized from cloud");
-                this.saveLocal();
+                console.log("📥 Sync Complete.");
+                // Update Local Storage immediately without triggering another cloud save
+                localStorage.setItem('chrono_track_students', JSON.stringify(window.appState.students));
+                localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
                 this.navigate(window.appState.view);
             }
 
         } catch (e) { 
             console.error("Sync Error:", e);
-            window.appState.lastError = e;
-            if(e.code === 'permission-denied') {
-                this.updateSyncStatus('error', "RÈGLES REFUSÉES");
-            }
         }
     },
 
@@ -274,15 +302,15 @@ window.app = {
             text.className = "text-[10px] text-green-600 font-bold uppercase tracking-wider";
         } else if (status === 'syncing') {
             dot.innerHTML = `<span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span><span class="relative inline-flex rounded-full h-2 w-2 bg-blue-500"></span>`;
-            text.innerText = labelOverride || "CONNEXION...";
+            text.innerText = labelOverride || "SYNC...";
             text.className = "text-[10px] text-blue-600 font-bold uppercase tracking-wider";
         } else if (status === 'error') {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-red-500"></span>`;
-            text.innerText = labelOverride || "ERREUR (cliquer)";
+            text.innerText = labelOverride || "ERREUR";
             text.className = "text-[10px] text-red-500 font-bold uppercase tracking-wider cursor-pointer underline";
         } else {
             dot.innerHTML = `<span class="relative inline-flex rounded-full h-2 w-2 bg-slate-400"></span>`;
-            text.innerText = labelOverride || "LOCAL (cliquer)";
+            text.innerText = labelOverride || "OFFLINE";
             text.className = "text-[10px] text-slate-400 font-bold uppercase tracking-wider cursor-pointer";
         }
     },
@@ -300,24 +328,28 @@ window.app = {
         });
         window.appState.students.sort((a,b) => a.name.localeCompare(b.name));
         input.value = '';
-        this.saveLocal();
+        this.saveLocal(true);
         this.renderStudents();
     },
 
     deleteStudent(id) {
         if (!confirm("Supprimer ?")) return;
         window.appState.students = window.appState.students.filter(s => s.id !== id);
-        this.saveLocal();
+        this.saveLocal(true);
         this.renderStudents();
     },
 
     toggleTimer(studentId) {
         if (window.appState.activeTimes[studentId]) {
+            // STOP
             this.updateStudentSessionTime(studentId);
             delete window.appState.activeTimes[studentId];
         } else {
+            // START
             window.appState.activeTimes[studentId] = Date.now();
         }
+        // Save state immediately (Start or Stop)
+        this.saveLocal(true);
         this.renderLive();
     },
 
@@ -328,7 +360,7 @@ window.app = {
         const session = this.ensureCurrentSessionExists();
         if(session) {
             session.results[studentId] = { total: 0, passages: [] };
-            this.saveLocal();
+            this.saveLocal(true);
             this.renderLive();
         }
     },
@@ -344,7 +376,7 @@ window.app = {
         const newPassages = res.passages ? [...res.passages, 0] : [res.total || 0, 0];
         
         session.results[studentId] = { ...res, passages: newPassages };
-        this.saveLocal();
+        this.saveLocal(true);
         this.renderLive();
     },
 
@@ -366,6 +398,8 @@ window.app = {
 
             session.results[studentId] = { total: newTotal, passages: passages };
             window.appState.activeTimes[studentId] = now;
+            
+            // Only update local storage here to avoid freezing UI with network calls
             localStorage.setItem('chrono_track_sessions', JSON.stringify(window.appState.sessions));
         }
     },
@@ -384,11 +418,24 @@ window.app = {
                 }
             }
         });
+
+        // Totals & Averages
+        let totalSec = 0;
+        let activeStudentCount = 0;
+
+        Object.values(session.results).forEach(r => {
+            const t = r.total || 0;
+            totalSec += t;
+            if (t > 0) activeStudentCount++;
+        });
+
         const totalLiveEl = document.getElementById('live-total-time');
-        if(totalLiveEl) {
-             let totalSec = 0;
-             Object.values(session.results).forEach(r => totalSec += (r.total || 0));
-             totalLiveEl.innerText = this.formatTime(totalSec);
+        if(totalLiveEl) totalLiveEl.innerText = this.formatTime(totalSec);
+
+        const avgLiveEl = document.getElementById('live-avg-time');
+        if(avgLiveEl) {
+            const avg = activeStudentCount > 0 ? Math.floor(totalSec / activeStudentCount) : 0;
+            avgLiveEl.innerText = this.formatTime(avg);
         }
     },
 
@@ -396,7 +443,6 @@ window.app = {
         const container = document.getElementById('live-list');
         const dateEl = document.getElementById('live-session-date');
         
-        // Display formatted Local Date
         if(dateEl) {
             const [y, m, d] = window.appState.currentSessionId.split('-');
             dateEl.innerText = `${d}/${m}/${y}`;
@@ -404,7 +450,6 @@ window.app = {
 
         if (!container) return;
 
-        // Auto-Repair: If session is missing for today, create it silently to avoid crash
         let session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
         if (!session) {
             session = this.ensureCurrentSessionExists();
@@ -416,7 +461,6 @@ window.app = {
         }
 
         container.innerHTML = window.appState.students.map(s => {
-            // Safe access to results
             const res = (session.results && session.results[s.id]) || { total: 0, passages: [0] };
             const isActive = !!window.appState.activeTimes[s.id];
             const currentPassage = res.passages ? res.passages[res.passages.length - 1] : 0;
@@ -450,6 +494,8 @@ window.app = {
                 </div>
             </div>`;
         }).join('');
+        
+        this.updateLiveUI();
         if (window.lucide) window.lucide.createIcons();
     },
 
@@ -650,7 +696,6 @@ window.app = {
         const container = document.getElementById('history-content');
         const dateInput = document.getElementById('history-date');
         
-        // Ensure date input has a default value (today or current selected)
         if(!dateInput.value) dateInput.value = window.appState.currentSessionId;
         
         const targetDate = dateInput.value;
@@ -661,7 +706,6 @@ window.app = {
             return;
         }
         
-        // Ensure students list exists
         if (!window.appState.students || window.appState.students.length === 0) {
             container.innerHTML = `<div class="text-center py-10 text-slate-300">Liste d'élèves vide.</div>`;
             return;

@@ -2,12 +2,20 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebas
 import { getFirestore, collection, doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore.js";
 import { getAuth, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-auth.js";
 
+// --- UTILS ---
+// Récupère la date locale format YYYY-MM-DD (corrige le bug de décalage horaire UTC)
+function getLocalDateString() {
+    const d = new Date();
+    const offset = d.getTimezoneOffset() * 60000;
+    return new Date(d.getTime() - offset).toISOString().split('T')[0];
+}
+
 // --- GLOBAL STATE ---
 window.appState = {
     view: 'stats',
     students: [],
     sessions: [],
-    currentSessionId: new Date().toISOString().split('T')[0],
+    currentSessionId: getLocalDateString(), // Utilise la date locale corrigée
     activeTimes: {},
     chartMode: 'week',
     db: null,
@@ -41,13 +49,11 @@ window.app = {
         window.appState.students = data.students;
         window.appState.sessions = data.sessions;
         
+        // Check Date on Init (in case app was kept open overnight)
+        window.appState.currentSessionId = getLocalDateString();
+        
         // Initial Session Check
-        let todaySession = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
-        if (!todaySession) {
-            todaySession = { id: window.appState.currentSessionId, date: new Date().toISOString(), results: {} };
-            window.appState.sessions.push(todaySession);
-            this.saveLocal();
-        }
+        this.ensureCurrentSessionExists();
 
         // 2. Initial Render
         this.navigate('stats');
@@ -66,6 +72,17 @@ window.app = {
         // 5. Start Tick
         setInterval(() => { this.tick(); }, 1000);
     },
+    
+    ensureCurrentSessionExists() {
+        let todaySession = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
+        if (!todaySession) {
+            console.log("Creating new session for today:", window.appState.currentSessionId);
+            todaySession = { id: window.appState.currentSessionId, date: new Date().toISOString(), results: {} };
+            window.appState.sessions.push(todaySession);
+            this.saveLocal();
+        }
+        return todaySession;
+    },
 
     async connectFirebase() {
         if (!window.FIREBASE_CONFIG || !window.FIREBASE_CONFIG.apiKey) {
@@ -76,21 +93,18 @@ window.app = {
 
         if (window.location.protocol === 'file:') {
             this.updateSyncStatus('offline', "MODE FICHIER (OFFLINE)");
-            // On ne bloque pas l'appli, mais on prévient
             return;
         }
 
         try {
             this.updateSyncStatus('syncing');
             
-            // Initialize only if not already done
             if (!window.appState.db) {
                 const fbApp = initializeApp(window.FIREBASE_CONFIG);
                 window.appState.db = getFirestore(fbApp);
                 window.appState.auth = getAuth(fbApp);
             }
 
-            // Auth Listener
             onAuthStateChanged(window.appState.auth, async (user) => {
                 if (user) {
                     console.log("🔒 Secured Connection Established (UID: " + user.uid + ")");
@@ -102,7 +116,6 @@ window.app = {
                 }
             });
 
-            // Trigger Login
             await signInAnonymously(window.appState.auth);
 
         } catch (e) {
@@ -111,7 +124,7 @@ window.app = {
             
             let shortError = "ERREUR";
             if (e.code === 'auth/operation-not-allowed') {
-                shortError = "ACTIVER AUTH !"; // Message spécifique
+                shortError = "ACTIVER AUTH !";
                 alert("ATTENTION : Vous devez activer l'authentification ANONYME dans la console Firebase (Menu Authentication > Sign-in method).");
             }
             else if (e.code === 'auth/network-request-failed') shortError = "PAS D'INTERNET";
@@ -135,6 +148,14 @@ window.app = {
     },
 
     tick() {
+        // Check for day change while app is running
+        const nowId = getLocalDateString();
+        if (nowId !== window.appState.currentSessionId) {
+            window.appState.currentSessionId = nowId;
+            this.ensureCurrentSessionExists();
+            this.renderLive(); // Refresh UI for new day
+        }
+
         const activeIds = Object.keys(window.appState.activeTimes);
         if (activeIds.length > 0) {
             activeIds.forEach(sid => { this.updateStudentSessionTime(sid); });
@@ -201,6 +222,9 @@ window.app = {
 
             if (snapStudents.exists()) {
                 const remoteList = snapStudents.data().list || [];
+                // Safety: Only overwrite local students if remote is not empty, OR if we really want to force (careful here)
+                // If local has data and remote is empty, we probably shouldn't wipe local unless explicit.
+                // For now, keep existing logic but be robust
                 if (forceUpdate || remoteList.length > 0) {
                      window.appState.students = remoteList;
                      hasChanges = true;
@@ -292,8 +316,8 @@ window.app = {
         if(!confirm("Réinitialiser le temps de cet élève pour cette session ?")) return;
         if (window.appState.activeTimes[studentId]) delete window.appState.activeTimes[studentId];
 
-        const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
-        if(session && session.results[studentId]) {
+        const session = this.ensureCurrentSessionExists();
+        if(session) {
             session.results[studentId] = { total: 0, passages: [] };
             this.saveLocal();
             this.renderLive();
@@ -305,8 +329,7 @@ window.app = {
             this.updateStudentSessionTime(studentId);
             window.appState.activeTimes[studentId] = Date.now();
         }
-        const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
-        if(!session) return;
+        const session = this.ensureCurrentSessionExists();
         
         const res = session.results[studentId] || { total: 0, passages: [] };
         const newPassages = res.passages ? [...res.passages, 0] : [res.total || 0, 0];
@@ -324,8 +347,7 @@ window.app = {
         const elapsed = Math.floor((now - start) / 1000);
         
         if (elapsed > 0) {
-            const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
-            if(!session) return;
+            const session = this.ensureCurrentSessionExists();
             
             const res = session.results[studentId] || { total: 0, passages: [0] };
             const newTotal = (res.total || 0) + elapsed;
@@ -364,18 +386,29 @@ window.app = {
     renderLive() {
         const container = document.getElementById('live-list');
         const dateEl = document.getElementById('live-session-date');
-        if(dateEl) dateEl.innerText = new Date().toLocaleDateString('fr-FR');
+        
+        // Display formatted Local Date
+        if(dateEl) {
+            const [y, m, d] = window.appState.currentSessionId.split('-');
+            dateEl.innerText = `${d}/${m}/${y}`;
+        }
 
         if (!container) return;
-        const session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
+
+        // Auto-Repair: If session is missing for today, create it silently to avoid crash
+        let session = window.appState.sessions.find(s => s.id === window.appState.currentSessionId);
+        if (!session) {
+            session = this.ensureCurrentSessionExists();
+        }
         
-        if (window.appState.students.length === 0) {
-            container.innerHTML = `<div class="text-center py-10 text-slate-400">Aucun élève. Allez dans l'onglet "Élèves".</div>`;
+        if (!window.appState.students || window.appState.students.length === 0) {
+            container.innerHTML = `<div class="text-center py-10 text-slate-400">Aucun élève. Allez dans l'onglet "Élèves" pour commencer.</div>`;
             return;
         }
 
         container.innerHTML = window.appState.students.map(s => {
-            const res = session.results[s.id] || { total: 0, passages: [0] };
+            // Safe access to results
+            const res = (session.results && session.results[s.id]) || { total: 0, passages: [0] };
             const isActive = !!window.appState.activeTimes[s.id];
             const currentPassage = res.passages ? res.passages[res.passages.length - 1] : 0;
 
@@ -415,7 +448,7 @@ window.app = {
         const container = document.getElementById('students-list-container');
         if (!container) return;
         
-        if (window.appState.students.length === 0) {
+        if (!window.appState.students || window.appState.students.length === 0) {
             container.innerHTML = '<div class="text-slate-400 text-center text-sm py-4">Ajoutez votre premier élève ci-dessus.</div>';
             return;
         }
@@ -475,7 +508,7 @@ window.app = {
     },
 
     renderStats() {
-        const today = new Date().toISOString().split('T')[0];
+        const today = getLocalDateString();
         const now = new Date();
         const oneWeekAgo = new Date(); oneWeekAgo.setDate(now.getDate() - 7);
         const currentMonthPrefix = today.substring(0, 7); 
@@ -607,14 +640,25 @@ window.app = {
     renderHistory() {
         const container = document.getElementById('history-content');
         const dateInput = document.getElementById('history-date');
+        
+        // Ensure date input has a default value (today or current selected)
         if(!dateInput.value) dateInput.value = window.appState.currentSessionId;
+        
         const targetDate = dateInput.value;
         const session = window.appState.sessions.find(s => s.id === targetDate);
+        
         if (!session) {
-            container.innerHTML = `<div class="text-center py-10 text-slate-300">Aucune session enregistrée à cette date.</div>`;
+            container.innerHTML = `<div class="text-center py-10 text-slate-300">Aucune session enregistrée pour le ${targetDate}.</div>`;
             return;
         }
-        container.innerHTML = window.appState.students.map(s => {
+        
+        // Ensure students list exists
+        if (!window.appState.students || window.appState.students.length === 0) {
+            container.innerHTML = `<div class="text-center py-10 text-slate-300">Liste d'élèves vide.</div>`;
+            return;
+        }
+
+        const html = window.appState.students.map(s => {
             const res = session.results[s.id];
             if (!res || res.total === 0) return '';
             return `
@@ -624,7 +668,9 @@ window.app = {
                     ${this.formatDurationHM(res.total)}
                 </span>
             </div>`;
-        }).join('') || `<div class="text-center py-10 text-slate-300">Aucune activité ce jour-là.</div>`;
+        }).join('');
+
+        container.innerHTML = html || `<div class="text-center py-10 text-slate-300">Aucune activité enregistrée ce jour-là.</div>`;
     }
 };
 

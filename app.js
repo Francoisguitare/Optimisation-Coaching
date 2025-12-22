@@ -220,20 +220,29 @@ window.app = {
             
             let hasChanges = false;
 
+            // SYNC STUDENTS
             if (snapStudents.exists()) {
                 const remoteList = snapStudents.data().list || [];
-                // Safety: Only overwrite local students if remote is not empty, OR if we really want to force (careful here)
-                // If local has data and remote is empty, we probably shouldn't wipe local unless explicit.
-                // For now, keep existing logic but be robust
-                if (forceUpdate || remoteList.length > 0) {
+                // IMPORTANT: Ne pas écraser les données locales par une liste vide si on a déjà des élèves
+                if (remoteList.length > 0) {
                      window.appState.students = remoteList;
                      hasChanges = true;
+                } else if (window.appState.students.length > 0) {
+                    // Si Cloud vide mais Local plein -> On envoie Local vers Cloud
+                    console.log("Cloud vide, Local plein -> Sauvegarde vers Cloud");
+                    this.saveToFirebase();
                 }
+            } else if (window.appState.students.length > 0) {
+                // Pas de doc Cloud, mais Local plein -> On crée
+                this.saveToFirebase();
             }
 
+            // SYNC SESSIONS
             if (snapSessions.exists()) {
                 const remoteSessions = snapSessions.data().list || [];
                 if (forceUpdate || remoteSessions.length > 0) {
+                    // Pour les sessions, on merge ou on prend le plus récent ?
+                    // Simplification: on prend le cloud s'il y a du contenu
                     window.appState.sessions = remoteSessions;
                     hasChanges = true;
                 }
@@ -659,12 +668,12 @@ window.app = {
         }
 
         const html = window.appState.students.map(s => {
-            const res = session.results[s.id];
-            if (!res || res.total === 0) return '';
+            const res = session.results[s.id] || { total: 0 };
+            const isZero = res.total === 0;
             return `
-            <div class="bg-white p-3 rounded-xl border border-slate-100 flex justify-between items-center shadow-sm">
+            <div class="bg-white p-3 rounded-xl border ${isZero ? 'border-slate-100 opacity-60' : 'border-indigo-100'} flex justify-between items-center shadow-sm">
                 <span class="font-bold text-slate-700 text-sm">${s.name}</span>
-                <span class="font-mono font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded text-xs">
+                <span class="font-mono font-bold ${isZero ? 'text-slate-400 bg-slate-50' : 'text-indigo-600 bg-indigo-50'} px-2 py-1 rounded text-xs">
                     ${this.formatDurationHM(res.total)}
                 </span>
             </div>`;

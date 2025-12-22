@@ -42,11 +42,11 @@
                 <h1 class="font-black text-lg leading-tight text-slate-800 hidden md:block">
                     CHRONO<span class="text-indigo-600">TRACK</span>
                 </h1>
-                <!-- NOUVEL INDICATEUR DE SAUVEGARDE -->
-                <div id="save-indicator" class="flex items-center gap-1.5 transition-colors duration-300">
-                    <i id="save-icon" data-lucide="cloud-off" class="w-4 h-4 text-slate-300"></i>
-                    <p id="save-text" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">OFFLINE</p>
-                </div>
+                <!-- INDICATEUR DE SAUVEGARDE AMÉLIORÉ -->
+                <button id="save-indicator" onclick="window.app?.retryConnection()" class="flex items-center gap-1.5 transition-colors duration-300 hover:bg-slate-50 p-1 rounded cursor-pointer">
+                    <i id="save-icon" data-lucide="loader-2" class="w-4 h-4 text-slate-400 animate-spin"></i>
+                    <p id="save-text" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">INIT...</p>
+                </button>
             </div>
         </div>
 

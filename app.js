@@ -547,59 +547,95 @@ window.app = {
 
     renderStats() {
         const today = getLocalDateString();
-        const now = new Date();
-        const oneWeekAgo = new Date(); oneWeekAgo.setDate(now.getDate() - 7);
+        // GENERATION ROBUSTE DES DATES (STRINGS) POUR LES 7 DERNIERS JOURS
+        // Ceci évite les problèmes de fuseaux horaires avec les objets Date()
+        const last7Days = [];
+        const last30Days = [];
+        
+        for(let i=0; i<7; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const offset = d.getTimezoneOffset() * 60000;
+            const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+            last7Days.push(dateStr);
+        }
+        
+        for(let i=0; i<30; i++) {
+            const d = new Date();
+            d.setDate(d.getDate() - i);
+            const offset = d.getTimezoneOffset() * 60000;
+            const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
+            last30Days.push(dateStr);
+        }
+        
         const currentMonthPrefix = today.substring(0, 7); 
 
+        // ACCUMULATEURS
         let dailyTotal = 0;
         let weeklyTotal = 0;
         let monthlyTotal = 0;
-        let weeklyStudentTimes = {}; 
-        let weeklyActiveCountSet = new Set();
-        let monthlyActiveCountSet = new Set();
-        const allStudentTimes = {};
+        
+        // SETS POUR COMPTER LES ELEVES UNIQUES ACTIFS
+        let weeklyActiveStudents = new Set();
+        let monthlyActiveStudents = new Set();
+        let weeklyStudentTimes = {}; // Pour le Top 5
 
         window.appState.sessions.forEach(sess => {
-            const sDate = new Date(sess.id);
-            let sessTotal = 0;
-            const isThisWeek = (sDate >= oneWeekAgo && sDate <= now);
+            const isToday = sess.id === today;
+            const isThisWeek = last7Days.includes(sess.id);
             const isThisMonth = sess.id.startsWith(currentMonthPrefix);
 
+            // Pour chaque élève dans la session
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
-                sessTotal += t;
-                if(t > 0) {
-                    allStudentTimes[sid] = (allStudentTimes[sid] || 0) + t;
-                    if(isThisWeek) {
-                         weeklyActiveCountSet.add(sid);
-                         weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
+                
+                // IMPORTANT: On ne compte QUE si le temps est > 0
+                if (t > 0) {
+                    if (isToday) dailyTotal += t;
+                    
+                    if (isThisWeek) {
+                        weeklyTotal += t;
+                        weeklyActiveStudents.add(sid);
+                        weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
                     }
-                    if(isThisMonth) monthlyActiveCountSet.add(sid);
+                    
+                    if (isThisMonth) {
+                        monthlyTotal += t;
+                        monthlyActiveStudents.add(sid);
+                    }
                 }
             });
-            if (sess.id === today) dailyTotal += sessTotal;
-            if (isThisMonth) monthlyTotal += sessTotal;
-            if (isThisWeek) weeklyTotal += sessTotal;
         });
 
-        const weekActiveCount = weeklyActiveCountSet.size || 1;
-        const monthActiveCount = monthlyActiveCountSet.size || 1;
-        const avgWeek = weeklyTotal / weekActiveCount;
-        const avgMonth = monthlyTotal / monthActiveCount;
+        // CALCULS DES MOYENNES (Total Temps / Nombre d'élèves uniques actifs sur la période)
+        const weekCount = weeklyActiveStudents.size || 1;
+        const monthCount = monthlyActiveStudents.size || 1;
+        
+        // Sécurité pour éviter division par 0 ou affichage étrange si vide
+        const avgWeek = weeklyActiveStudents.size > 0 ? (weeklyTotal / weekCount) : 0;
+        const avgMonth = monthlyActiveStudents.size > 0 ? (monthlyTotal / monthCount) : 0;
+        const activeStudentTotal = new Set([...weeklyActiveStudents, ...monthlyActiveStudents]).size;
 
+        // MISE A JOUR DU DOM
         const elDaily = document.getElementById('stat-daily-hours');
         if(elDaily) elDaily.innerText = this.formatDurationHM(dailyTotal);
+        
         const elWeekly = document.getElementById('stat-weekly-hours');
         if(elWeekly) elWeekly.innerText = this.formatDurationHM(weeklyTotal);
+        
         const elMonthly = document.getElementById('stat-monthly-hours');
         if(elMonthly) elMonthly.innerText = this.formatDurationHM(monthlyTotal);
+        
         const elAvgWeek = document.getElementById('stat-avg-week');
         if(elAvgWeek) elAvgWeek.innerText = this.formatDurationMS(avgWeek);
+        
         const elAvgMonth = document.getElementById('stat-avg-month');
         if(elAvgMonth) elAvgMonth.innerText = this.formatDurationMS(avgMonth);
+        
         const elActive = document.getElementById('stat-active-students');
-        if(elActive) elActive.innerText = Object.keys(allStudentTimes).length;
+        if(elActive) elActive.innerText = activeStudentTotal; // Affiche le nombre d'élèves ayant eu une activité récente
 
+        // TOP 5 STUDENTS (SEMAINE)
         const topContainer = document.getElementById('dashboard-top-students');
         if(topContainer) {
             const sortedStudents = Object.entries(weeklyStudentTimes).sort(([, a], [, b]) => b - a).slice(0, 5);
@@ -621,35 +657,40 @@ window.app = {
             }
         }
 
+        // GRAPHIQUE
         const ctx = document.getElementById('mainChart');
         if (ctx && window.Chart) {
             if (window.myChart instanceof Chart) window.myChart.destroy();
             let labels = [];
             let dataPoints = [];
             
-            if (window.appState.chartMode === 'week') {
-                for(let i=6; i>=0; i--) {
-                    const d = new Date(); d.setDate(now.getDate() - i);
-                    const dateStr = d.toISOString().split('T')[0];
-                    const dayName = d.toLocaleDateString('fr-FR', { weekday: 'short' });
-                    labels.push(dayName);
-                    const sess = window.appState.sessions.find(s => s.id === dateStr);
-                    let val = 0;
-                    if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
-                    dataPoints.push(Math.floor(val/60)); 
-                }
-            } else {
-                for(let i=14; i>=0; i--) {
-                    const d = new Date(); d.setDate(now.getDate() - i);
-                    const dateStr = d.toISOString().split('T')[0];
-                    const dayNum = d.getDate();
-                    labels.push(dayNum);
-                    const sess = window.appState.sessions.find(s => s.id === dateStr);
-                    let val = 0;
-                    if(sess) Object.values(sess.results).forEach(r => val += (r.total||0));
-                    dataPoints.push(Math.floor(val/60));
-                }
-            }
+            // On utilise les tableaux de dates générés au début pour garantir la cohérence avec les cartes
+            const datesToChart = window.appState.chartMode === 'week' ? [...last7Days].reverse() : [...last30Days].reverse();
+            
+            datesToChart.forEach(dateStr => {
+                 // Label
+                 const [y, m, d] = dateStr.split('-');
+                 if (window.appState.chartMode === 'week') {
+                     // Nom du jour (ex: Lun)
+                     const dateObj = new Date(y, m-1, d);
+                     labels.push(dateObj.toLocaleDateString('fr-FR', { weekday: 'short' }));
+                 } else {
+                     // Numéro du jour (ex: 27)
+                     labels.push(d);
+                 }
+
+                 // Data
+                 const sess = window.appState.sessions.find(s => s.id === dateStr);
+                 let val = 0;
+                 if(sess) {
+                     Object.values(sess.results).forEach(r => {
+                         const t = r.total || 0;
+                         if (t > 0) val += t;
+                     });
+                 }
+                 dataPoints.push(Math.floor(val/60)); // En minutes
+            });
+
             window.myChart = new Chart(ctx, {
                 type: 'bar',
                 data: {

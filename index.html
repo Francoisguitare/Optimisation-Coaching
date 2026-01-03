@@ -95,11 +95,23 @@
         <!-- VIEW: STATS (DASHBOARD) -->
         <div id="view-stats" class="view-section h-full overflow-y-auto p-4 custom-scrollbar section-hidden">
             <div class="max-w-5xl mx-auto space-y-6">
-                <!-- Header -->
-                <div class="flex justify-between items-end">
+                <!-- Header with Month Navigation -->
+                <div class="flex flex-col md:flex-row justify-between md:items-end gap-4">
                     <div>
                         <h2 class="text-2xl font-black text-slate-800">Tableau de bord</h2>
                         <p class="text-slate-500 text-sm">Métriques de performance</p>
+                    </div>
+                    <!-- Month Navigator -->
+                    <div class="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
+                        <button onclick="window.app.changeDashboardMonth(-1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
+                            <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                        </button>
+                        <div class="px-4 font-bold text-slate-700 min-w-[140px] text-center capitalize" id="dashboard-month-label">
+                            --
+                        </div>
+                        <button onclick="window.app.changeDashboardMonth(1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
+                            <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                        </button>
                     </div>
                 </div>
 
@@ -121,7 +133,7 @@
 
                     <!-- Monthly -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Mois</p>
+                        <p id="label-stat-month" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Mois</p>
                         <h3 id="stat-monthly-hours" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
                         <p class="text-[10px] text-blue-500 font-medium">Temps Total</p>
                     </div>
@@ -135,14 +147,14 @@
 
                     <!-- Avg Month -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne Mois</p>
+                        <p id="label-stat-avg-month" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne Mois</p>
                         <h3 id="stat-avg-month" class="text-2xl font-black text-pink-600 mt-1">0m 0s</h3>
                         <p class="text-[10px] text-pink-400 font-medium">Par élève actif</p>
                     </div>
 
                     <!-- Active Students -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Élèves</p>
+                        <p id="label-stat-students" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Élèves</p>
                         <h3 id="stat-active-students" class="text-2xl font-black text-amber-600 mt-1">0</h3>
                         <p class="text-[10px] text-amber-500 font-medium">Actifs au total</p>
                     </div>
@@ -157,8 +169,8 @@
                         </h3>
                         <!-- Period Selector -->
                         <div class="bg-slate-100 p-1 rounded-lg flex text-[10px] font-bold">
-                            <button id="chart-btn-week" onclick="window.app?.toggleChart('week')" class="px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all">Semaine</button>
-                            <button id="chart-btn-month" onclick="window.app?.toggleChart('month')" class="px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all">Mois</button>
+                            <button id="chart-btn-week" onclick="window.app?.toggleChart('week')" class="px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all">Semaine</button>
+                            <button id="chart-btn-month" onclick="window.app?.toggleChart('month')" class="px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all">Mois</button>
                         </div>
                     </div>
                     <div class="h-64 relative">

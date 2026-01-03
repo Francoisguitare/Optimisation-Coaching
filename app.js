@@ -17,6 +17,7 @@ window.appState = {
     currentSessionId: getLocalDateString(),
     activeTimes: {},
     chartMode: 'week',
+    dashboardDate: new Date(), // Nouvelle variable pour la navigation par mois
     db: null,
     auth: null,
     isFirebaseReady: false,
@@ -506,19 +507,39 @@ window.app = {
         if (window.lucide) window.lucide.createIcons();
     },
 
+    changeDashboardMonth(delta) {
+        // Modifie le mois sélectionné
+        const newDate = new Date(window.appState.dashboardDate);
+        newDate.setMonth(newDate.getMonth() + delta);
+        window.appState.dashboardDate = newDate;
+        
+        // Force le graphique en mode 'mois' quand on navigue
+        window.appState.chartMode = 'month'; 
+        this.renderStats();
+    },
+
     toggleChart(mode) {
-        window.appState.chartMode = mode;
+        if (mode === 'week') {
+            // Si on demande la semaine, on revient au temps réel (Mois en cours) pour que "Semaine" ait du sens
+            window.appState.dashboardDate = new Date();
+            window.appState.chartMode = 'week';
+        } else {
+            window.appState.chartMode = 'month';
+        }
+        
+        // Update Buttons UI
         const btnWeek = document.getElementById('chart-btn-week');
         const btnMonth = document.getElementById('chart-btn-month');
         if(!btnWeek || !btnMonth) return;
         
-        if(mode === 'week') {
+        if(window.appState.chartMode === 'week') {
             btnWeek.className = "px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all";
             btnMonth.className = "px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all";
         } else {
             btnWeek.className = "px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all";
             btnMonth.className = "px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all";
         }
+        
         this.renderStats();
     },
     
@@ -547,28 +568,44 @@ window.app = {
 
     renderStats() {
         const today = getLocalDateString();
-        // GENERATION ROBUSTE DES DATES (STRINGS) POUR LES 7 DERNIERS JOURS
-        // Ceci évite les problèmes de fuseaux horaires avec les objets Date()
+        
+        // --- 1. GESTION DE LA NAVIGATION PAR MOIS ---
+        const selectedDate = window.appState.dashboardDate;
+        const selectedYear = selectedDate.getFullYear();
+        const selectedMonthIndex = selectedDate.getMonth(); // 0-11
+        
+        // Update Label
+        const monthLabel = document.getElementById('dashboard-month-label');
+        if (monthLabel) {
+            const monthName = selectedDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
+            monthLabel.innerText = monthName;
+        }
+
+        // Labels dynamiques pour les cartes Mensuelles
+        const monthShortName = selectedDate.toLocaleDateString('fr-FR', { month: 'short' });
+        const lblMonth = document.getElementById('label-stat-month');
+        if(lblMonth) lblMonth.innerText = "MOIS (" + monthShortName.toUpperCase() + ")";
+        const lblAvgMonth = document.getElementById('label-stat-avg-month');
+        if(lblAvgMonth) lblAvgMonth.innerText = "MOYENNE (" + monthShortName.toUpperCase() + ")";
+        const lblStudents = document.getElementById('label-stat-students');
+        if(lblStudents) lblStudents.innerText = "ÉLÈVES (" + monthShortName.toUpperCase() + ")";
+
+        // Prefix pour filtrer les sessions du mois sélectionné (ex: "2023-10")
+        // Attention: getMonth() est 0-indexed, on doit padder
+        const selectedMonthPadded = (selectedMonthIndex + 1).toString().padStart(2, '0');
+        const selectedMonthPrefix = `${selectedYear}-${selectedMonthPadded}`;
+        
+        // Prefix pour le mois en cours "réel" (pour la comparaison)
+        const currentRealMonthPrefix = today.substring(0, 7);
+
+        // --- 2. GENERATION DES DATES POUR LE GRAPHIQUE/STATS ---
         const last7Days = [];
-        const last30Days = [];
-        
+        // Pour les stats "Semaine", on garde toujours les 7 derniers jours réels
         for(let i=0; i<7; i++) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
+            const d = new Date(); d.setDate(d.getDate() - i);
             const offset = d.getTimezoneOffset() * 60000;
-            const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-            last7Days.push(dateStr);
+            last7Days.push(new Date(d.getTime() - offset).toISOString().split('T')[0]);
         }
-        
-        for(let i=0; i<30; i++) {
-            const d = new Date();
-            d.setDate(d.getDate() - i);
-            const offset = d.getTimezoneOffset() * 60000;
-            const dateStr = new Date(d.getTime() - offset).toISOString().split('T')[0];
-            last30Days.push(dateStr);
-        }
-        
-        const currentMonthPrefix = today.substring(0, 7); 
 
         // ACCUMULATEURS
         let dailyTotal = 0;
@@ -578,28 +615,28 @@ window.app = {
         // SETS POUR COMPTER LES ELEVES UNIQUES ACTIFS
         let weeklyActiveStudents = new Set();
         let monthlyActiveStudents = new Set();
-        let weeklyStudentTimes = {}; // Pour le Top 5
+        let weeklyStudentTimes = {}; // Pour le Top 5 (toujours basé sur la semaine réelle)
 
         window.appState.sessions.forEach(sess => {
             const isToday = sess.id === today;
-            const isThisWeek = last7Days.includes(sess.id);
-            const isThisMonth = sess.id.startsWith(currentMonthPrefix);
+            const isRealWeek = last7Days.includes(sess.id);
+            // Est-ce que cette session appartient au mois SÉLECTIONNÉ ?
+            const isSelectedMonth = sess.id.startsWith(selectedMonthPrefix);
 
-            // Pour chaque élève dans la session
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
                 
-                // IMPORTANT: On ne compte QUE si le temps est > 0
                 if (t > 0) {
+                    // Les stats "Aujourd'hui" et "Semaine" restent Temps Réel
                     if (isToday) dailyTotal += t;
-                    
-                    if (isThisWeek) {
+                    if (isRealWeek) {
                         weeklyTotal += t;
                         weeklyActiveStudents.add(sid);
                         weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
                     }
                     
-                    if (isThisMonth) {
+                    // Les stats "Mois" suivent la navigation
+                    if (isSelectedMonth) {
                         monthlyTotal += t;
                         monthlyActiveStudents.add(sid);
                     }
@@ -607,14 +644,13 @@ window.app = {
             });
         });
 
-        // CALCULS DES MOYENNES (Total Temps / Nombre d'élèves uniques actifs sur la période)
+        // CALCULS MOYENNES
         const weekCount = weeklyActiveStudents.size || 1;
         const monthCount = monthlyActiveStudents.size || 1;
         
-        // Sécurité pour éviter division par 0 ou affichage étrange si vide
         const avgWeek = weeklyActiveStudents.size > 0 ? (weeklyTotal / weekCount) : 0;
         const avgMonth = monthlyActiveStudents.size > 0 ? (monthlyTotal / monthCount) : 0;
-        const activeStudentTotal = new Set([...weeklyActiveStudents, ...monthlyActiveStudents]).size;
+        const activeStudentTotal = monthlyActiveStudents.size;
 
         // MISE A JOUR DU DOM
         const elDaily = document.getElementById('stat-daily-hours');
@@ -633,9 +669,9 @@ window.app = {
         if(elAvgMonth) elAvgMonth.innerText = this.formatDurationMS(avgMonth);
         
         const elActive = document.getElementById('stat-active-students');
-        if(elActive) elActive.innerText = activeStudentTotal; // Affiche le nombre d'élèves ayant eu une activité récente
+        if(elActive) elActive.innerText = activeStudentTotal;
 
-        // TOP 5 STUDENTS (SEMAINE)
+        // TOP 5 STUDENTS (Toujours Semaine Réelle pour voir l'activité récente)
         const topContainer = document.getElementById('dashboard-top-students');
         if(topContainer) {
             const sortedStudents = Object.entries(weeklyStudentTimes).sort(([, a], [, b]) => b - a).slice(0, 5);
@@ -657,39 +693,55 @@ window.app = {
             }
         }
 
-        // GRAPHIQUE
+        // --- GRAPHIQUE ---
         const ctx = document.getElementById('mainChart');
         if (ctx && window.Chart) {
             if (window.myChart instanceof Chart) window.myChart.destroy();
             let labels = [];
             let dataPoints = [];
             
-            // On utilise les tableaux de dates générés au début pour garantir la cohérence avec les cartes
-            const datesToChart = window.appState.chartMode === 'week' ? [...last7Days].reverse() : [...last30Days].reverse();
-            
-            datesToChart.forEach(dateStr => {
-                 // Label
-                 const [y, m, d] = dateStr.split('-');
-                 if (window.appState.chartMode === 'week') {
-                     // Nom du jour (ex: Lun)
+            // Si on est en mode MOIS : On affiche tous les jours du mois sélectionné
+            if (window.appState.chartMode === 'month') {
+                // Nombre de jours dans le mois sélectionné
+                const daysInMonth = new Date(selectedYear, selectedMonthIndex + 1, 0).getDate();
+                
+                for(let i=1; i<=daysInMonth; i++) {
+                     labels.push(i); // Jour du mois (1, 2, 3...)
+                     // Format YYYY-MM-DD
+                     const dayStr = i.toString().padStart(2, '0');
+                     const dateStr = `${selectedMonthPrefix}-${dayStr}`;
+                     
+                     const sess = window.appState.sessions.find(s => s.id === dateStr);
+                     let val = 0;
+                     if(sess) {
+                         Object.values(sess.results).forEach(r => {
+                             const t = r.total || 0;
+                             if (t > 0) val += t;
+                         });
+                     }
+                     dataPoints.push(Math.floor(val/60)); 
+                }
+            } else {
+                // Mode SEMAINE (Temps Réel)
+                // On utilise last7Days calculé plus haut (qui est inversé pour le calcul, on le reverse pour l'affichage chronologique)
+                const datesToChart = [...last7Days].reverse();
+                
+                datesToChart.forEach(dateStr => {
+                     const [y, m, d] = dateStr.split('-');
                      const dateObj = new Date(y, m-1, d);
                      labels.push(dateObj.toLocaleDateString('fr-FR', { weekday: 'short' }));
-                 } else {
-                     // Numéro du jour (ex: 27)
-                     labels.push(d);
-                 }
 
-                 // Data
-                 const sess = window.appState.sessions.find(s => s.id === dateStr);
-                 let val = 0;
-                 if(sess) {
-                     Object.values(sess.results).forEach(r => {
-                         const t = r.total || 0;
-                         if (t > 0) val += t;
-                     });
-                 }
-                 dataPoints.push(Math.floor(val/60)); // En minutes
-            });
+                     const sess = window.appState.sessions.find(s => s.id === dateStr);
+                     let val = 0;
+                     if(sess) {
+                         Object.values(sess.results).forEach(r => {
+                             const t = r.total || 0;
+                             if (t > 0) val += t;
+                         });
+                     }
+                     dataPoints.push(Math.floor(val/60));
+                });
+            }
 
             window.myChart = new Chart(ctx, {
                 type: 'bar',
@@ -700,7 +752,7 @@ window.app = {
                         data: dataPoints,
                         backgroundColor: '#4f46e5',
                         borderRadius: 4,
-                        barThickness: window.appState.chartMode === 'week' ? 20 : 10
+                        barThickness: window.appState.chartMode === 'week' ? 20 : 6 // Plus fin si mois entier
                     }]
                 },
                 options: {

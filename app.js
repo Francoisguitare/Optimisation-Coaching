@@ -580,6 +580,12 @@ window.app = {
             const monthName = selectedDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
             monthLabel.innerText = monthName;
         }
+        
+        // Update Monthly Ranking Label
+        const rankingLabel = document.getElementById('monthly-ranking-label');
+        if (rankingLabel) {
+            rankingLabel.innerText = "(" + selectedDate.toLocaleDateString('fr-FR', { month: 'long' }) + ")";
+        }
 
         // Labels dynamiques pour les cartes Mensuelles
         const monthShortName = selectedDate.toLocaleDateString('fr-FR', { month: 'short' });
@@ -616,6 +622,7 @@ window.app = {
         let weeklyActiveStudents = new Set();
         let monthlyActiveStudents = new Set();
         let weeklyStudentTimes = {}; // Pour le Top 5 (toujours basé sur la semaine réelle)
+        let monthlyStudentStats = {}; // NOUVEAU: Pour le classement mensuel complet
 
         window.appState.sessions.forEach(sess => {
             const isToday = sess.id === today;
@@ -639,6 +646,11 @@ window.app = {
                     if (isSelectedMonth) {
                         monthlyTotal += t;
                         monthlyActiveStudents.add(sid);
+                        
+                        // Accumulation pour le classement mensuel
+                        if(!monthlyStudentStats[sid]) monthlyStudentStats[sid] = { total: 0, sessionsCount: 0 };
+                        monthlyStudentStats[sid].total += t;
+                        monthlyStudentStats[sid].sessionsCount += 1;
                     }
                 }
             });
@@ -688,6 +700,38 @@ window.app = {
                              <span class="text-slate-700 font-bold">${name}</span>
                         </div>
                         <span class="font-mono text-xs font-bold bg-slate-100 px-2 py-0.5 rounded text-slate-500">${this.formatDurationHM(time)}</span>
+                    </div>`;
+                }).join('');
+            }
+        }
+        
+        // CLASSEMENT MENSUEL COMPLET
+        const monthlyRankingContainer = document.getElementById('dashboard-monthly-ranking');
+        if (monthlyRankingContainer) {
+            const sortedMonthly = Object.entries(monthlyStudentStats).sort(([, a], [, b]) => b.total - a.total);
+            
+            if (sortedMonthly.length === 0) {
+                monthlyRankingContainer.innerHTML = '<div class="text-slate-400 text-xs italic py-4 text-center">Aucune donnée pour ce mois.</div>';
+            } else {
+                monthlyRankingContainer.innerHTML = sortedMonthly.map(([sid, stats], index) => {
+                    const student = window.appState.students.find(s => s.id === sid);
+                    const name = student ? student.name : sid;
+                    // Couleurs pour le podium
+                    let rankColor = "bg-slate-100 text-slate-500";
+                    if(index === 0) rankColor = "bg-yellow-100 text-yellow-600";
+                    if(index === 1) rankColor = "bg-slate-200 text-slate-600";
+                    if(index === 2) rankColor = "bg-orange-100 text-orange-600";
+
+                    return `
+                    <div class="flex justify-between items-center text-sm bg-slate-50 p-2 rounded-lg border border-slate-100">
+                        <div class="flex items-center gap-3">
+                             <div class="w-6 h-6 rounded-full ${rankColor} font-bold text-xs flex items-center justify-center shrink-0">${index + 1}</div>
+                             <div class="flex flex-col">
+                                <span class="text-slate-700 font-bold leading-tight">${name}</span>
+                                <span class="text-[10px] text-slate-400 font-medium">${stats.sessionsCount} session${stats.sessionsCount > 1 ? 's' : ''}</span>
+                             </div>
+                        </div>
+                        <span class="font-mono text-xs font-bold text-indigo-600">${this.formatDurationHM(stats.total)}</span>
                     </div>`;
                 }).join('');
             }

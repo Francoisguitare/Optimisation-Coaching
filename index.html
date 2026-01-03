@@ -178,16 +178,31 @@
                     </div>
                 </div>
 
-                <!-- Top Students (Replaces Recent Activity) -->
-                <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
-                    <div class="flex justify-between items-center mb-4">
-                        <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
-                            <i data-lucide="trophy" class="w-4 h-4 text-yellow-500"></i>
-                            Top 5 Élèves (Semaine)
-                        </h3>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Top Students Week -->
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                <i data-lucide="trophy" class="w-4 h-4 text-yellow-500"></i>
+                                Top 5 Élèves (Semaine)
+                            </h3>
+                        </div>
+                        <div id="dashboard-top-students" class="space-y-3">
+                            <!-- Populated via JS -->
+                        </div>
                     </div>
-                    <div id="dashboard-top-students" class="space-y-3">
-                        <!-- Populated via JS -->
+
+                    <!-- Monthly Ranking -->
+                    <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
+                        <div class="flex justify-between items-center mb-4">
+                            <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
+                                <i data-lucide="medal" class="w-4 h-4 text-orange-500"></i>
+                                Classement Mensuel <span id="monthly-ranking-label" class="text-slate-400 font-normal ml-1"></span>
+                            </h3>
+                        </div>
+                        <div id="dashboard-monthly-ranking" class="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">
+                            <!-- Populated via JS -->
+                        </div>
                     </div>
                 </div>
             </div>

@@ -597,13 +597,9 @@ window.app = {
         if(lblStudents) lblStudents.innerText = "ÉLÈVES (" + monthShortName.toUpperCase() + ")";
 
         // Prefix pour filtrer les sessions du mois sélectionné (ex: "2023-10")
-        // Attention: getMonth() est 0-indexed, on doit padder
         const selectedMonthPadded = (selectedMonthIndex + 1).toString().padStart(2, '0');
         const selectedMonthPrefix = `${selectedYear}-${selectedMonthPadded}`;
         
-        // Prefix pour le mois en cours "réel" (pour la comparaison)
-        const currentRealMonthPrefix = today.substring(0, 7);
-
         // --- 2. GENERATION DES DATES POUR LE GRAPHIQUE/STATS ---
         const last7Days = [];
         // Pour les stats "Semaine", on garde toujours les 7 derniers jours réels
@@ -622,7 +618,7 @@ window.app = {
         let weeklyActiveStudents = new Set();
         let monthlyActiveStudents = new Set();
         let weeklyStudentTimes = {}; // Pour le Top 5 (toujours basé sur la semaine réelle)
-        let monthlyStudentStats = {}; // NOUVEAU: Pour le classement mensuel complet
+        let monthlyStudentStats = {}; // Pour le classement mensuel complet
 
         window.appState.sessions.forEach(sess => {
             const isToday = sess.id === today;
@@ -683,7 +679,7 @@ window.app = {
         const elActive = document.getElementById('stat-active-students');
         if(elActive) elActive.innerText = activeStudentTotal;
 
-        // TOP 5 STUDENTS (Toujours Semaine Réelle pour voir l'activité récente)
+        // TOP 5 STUDENTS (Semaine)
         const topContainer = document.getElementById('dashboard-top-students');
         if(topContainer) {
             const sortedStudents = Object.entries(weeklyStudentTimes).sort(([, a], [, b]) => b - a).slice(0, 5);
@@ -711,19 +707,24 @@ window.app = {
             const sortedMonthly = Object.entries(monthlyStudentStats).sort(([, a], [, b]) => b.total - a.total);
             
             if (sortedMonthly.length === 0) {
-                monthlyRankingContainer.innerHTML = '<div class="text-slate-400 text-xs italic py-4 text-center">Aucune donnée pour ce mois.</div>';
+                // Affichage d'un message plus explicite si aucune donnée n'est trouvée
+                monthlyRankingContainer.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-8 bg-slate-50 rounded-xl border border-slate-100 border-dashed">
+                        <i data-lucide="calendar-x" class="w-6 h-6 text-slate-300 mb-2"></i>
+                        <p class="text-slate-400 text-xs font-bold uppercase tracking-wider">Aucune activité</p>
+                        <p class="text-slate-300 text-[10px] mt-1">Aucune session enregistrée pour ${selectedDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}</p>
+                    </div>`;
             } else {
                 monthlyRankingContainer.innerHTML = sortedMonthly.map(([sid, stats], index) => {
                     const student = window.appState.students.find(s => s.id === sid);
                     const name = student ? student.name : sid;
-                    // Couleurs pour le podium
                     let rankColor = "bg-slate-100 text-slate-500";
                     if(index === 0) rankColor = "bg-yellow-100 text-yellow-600";
                     if(index === 1) rankColor = "bg-slate-200 text-slate-600";
                     if(index === 2) rankColor = "bg-orange-100 text-orange-600";
 
                     return `
-                    <div class="flex justify-between items-center text-sm bg-slate-50 p-2 rounded-lg border border-slate-100">
+                    <div class="flex justify-between items-center text-sm bg-slate-50 p-2 rounded-lg border border-slate-100 hover:bg-white hover:shadow-sm transition-all">
                         <div class="flex items-center gap-3">
                              <div class="w-6 h-6 rounded-full ${rankColor} font-bold text-xs flex items-center justify-center shrink-0">${index + 1}</div>
                              <div class="flex flex-col">
@@ -735,6 +736,8 @@ window.app = {
                     </div>`;
                 }).join('');
             }
+            // IMPORTANT: Rafraîchir les icônes après insertion HTML
+            if (window.lucide) window.lucide.createIcons();
         }
 
         // --- GRAPHIQUE ---
@@ -746,12 +749,9 @@ window.app = {
             
             // Si on est en mode MOIS : On affiche tous les jours du mois sélectionné
             if (window.appState.chartMode === 'month') {
-                // Nombre de jours dans le mois sélectionné
                 const daysInMonth = new Date(selectedYear, selectedMonthIndex + 1, 0).getDate();
-                
                 for(let i=1; i<=daysInMonth; i++) {
-                     labels.push(i); // Jour du mois (1, 2, 3...)
-                     // Format YYYY-MM-DD
+                     labels.push(i); 
                      const dayStr = i.toString().padStart(2, '0');
                      const dateStr = `${selectedMonthPrefix}-${dayStr}`;
                      
@@ -767,9 +767,7 @@ window.app = {
                 }
             } else {
                 // Mode SEMAINE (Temps Réel)
-                // On utilise last7Days calculé plus haut (qui est inversé pour le calcul, on le reverse pour l'affichage chronologique)
                 const datesToChart = [...last7Days].reverse();
-                
                 datesToChart.forEach(dateStr => {
                      const [y, m, d] = dateStr.split('-');
                      const dateObj = new Date(y, m-1, d);
@@ -796,7 +794,7 @@ window.app = {
                         data: dataPoints,
                         backgroundColor: '#4f46e5',
                         borderRadius: 4,
-                        barThickness: window.appState.chartMode === 'week' ? 20 : 6 // Plus fin si mois entier
+                        barThickness: window.appState.chartMode === 'week' ? 20 : 6
                     }]
                 },
                 options: {

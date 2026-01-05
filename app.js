@@ -329,6 +329,22 @@ window.app = {
         this.renderStudents();
     },
 
+    editStudent(id) {
+        const student = window.appState.students.find(s => s.id === id);
+        if (!student) return;
+        
+        const newName = prompt("Modifier le nom de l'élève :", student.name);
+        if (newName && newName.trim() !== "") {
+            student.name = newName.trim();
+            // Re-trier la liste alphabétiquement
+            window.appState.students.sort((a,b) => a.name.localeCompare(b.name));
+            this.persistLocal(true);
+            this.renderStudents();
+            // Rafraichir les autres vues au cas où
+            if(window.appState.view === 'live') this.renderLive();
+        }
+    },
+
     deleteStudent(id) {
         if (!confirm("Supprimer ?")) return;
         window.appState.students = window.appState.students.filter(s => s.id !== id);
@@ -343,6 +359,36 @@ window.app = {
         } else {
             window.appState.activeTimes[studentId] = Date.now();
         }
+        this.persistLocal(true); 
+        this.renderLive();
+    },
+
+    addManualTime(studentId) {
+        const input = prompt("Temps à ajouter en minutes (ex: 5 pour ajouter, -5 pour retirer) :");
+        if (input === null) return;
+        
+        const minutes = parseInt(input);
+        if (isNaN(minutes)) {
+            alert("Veuillez entrer un nombre valide.");
+            return;
+        }
+
+        const secondsToAdd = minutes * 60;
+        const session = this.ensureCurrentSessionExists();
+        const res = session.results[studentId] || { total: 0, passages: [] };
+        
+        let newTotal = (res.total || 0) + secondsToAdd;
+        if(newTotal < 0) newTotal = 0;
+
+        // On ajoute ce temps comme un nouveau "passage" fictif ou on l'ajoute au dernier
+        let newPassages = res.passages ? [...res.passages] : [0];
+        if(newPassages.length === 0) newPassages = [0];
+        
+        // On ajoute simplement au dernier passage pour simplifier
+        newPassages[newPassages.length - 1] += secondsToAdd;
+        if(newPassages[newPassages.length - 1] < 0) newPassages[newPassages.length - 1] = 0;
+
+        session.results[studentId] = { total: newTotal, passages: newPassages };
         this.persistLocal(true); 
         this.renderLive();
     },
@@ -465,8 +511,12 @@ window.app = {
                     <div id="time-${s.id}" class="font-mono font-bold text-lg tabular-nums w-14 text-right ${isActive ? 'text-indigo-600' : 'text-slate-300'}">
                         ${this.formatTime(currentPassage)}
                     </div>
-                    <button onclick="window.app.stepPassage('${s.id}')" class="h-8 w-8 rounded-lg bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-indigo-100 transition-colors">
+                    <button onclick="window.app.stepPassage('${s.id}')" class="h-8 w-8 rounded-lg bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-indigo-100 transition-colors" title="Nouveau passage">
                         <i data-lucide="step-forward" class="w-3 h-3"></i>
+                    </button>
+                    <!-- Ajout Temps Manuel -->
+                    <button onclick="window.app.addManualTime('${s.id}')" class="h-8 w-8 rounded-lg bg-slate-50 text-slate-400 flex items-center justify-center hover:bg-indigo-100 transition-colors" title="Ajout manuel">
+                        <i data-lucide="clock-4" class="w-3 h-3"></i>
                     </button>
                     <button onclick="window.app.toggleTimer('${s.id}')" class="timer-btn h-8 w-8 rounded-full border border-slate-200 flex items-center justify-center shadow-sm transition-all ${isActive ? '' : 'bg-white text-slate-600'}">
                         <i data-lucide="${isActive ? 'pause' : 'play'}" class="w-3 h-3 ml-0.5"></i>
@@ -499,9 +549,14 @@ window.app = {
                     </div>
                     <span class="font-bold text-slate-700 text-sm">${s.name}</span>
                 </div>
-                <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-2">
-                    <i data-lucide="trash-2" class="w-4 h-4"></i>
-                </button>
+                <div class="flex items-center">
+                    <button onclick="window.app.editStudent('${s.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-2">
+                        <i data-lucide="pencil" class="w-4 h-4"></i>
+                    </button>
+                    <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-2">
+                        <i data-lucide="trash-2" class="w-4 h-4"></i>
+                    </button>
+                </div>
             </div>
         `).join('');
         if (window.lucide) window.lucide.createIcons();
@@ -566,6 +621,21 @@ window.app = {
         return `${s}s`;
     },
 
+    // Helper pour générer l'HTML de tendance
+    renderTrend(current, previous) {
+        if (previous === 0) return ''; // Pas de données précédentes
+        const diff = current - previous;
+        const isImprovement = diff > 0;
+        const isNeutral = diff === 0;
+
+        if (isNeutral) return `<span class="ml-2 text-slate-300"><i data-lucide="minus" class="w-4 h-4 inline"></i></span>`;
+        
+        const color = isImprovement ? 'text-emerald-500' : 'text-red-400';
+        const icon = isImprovement ? 'trending-up' : 'trending-down';
+        
+        return `<span class="ml-2 ${color}"><i data-lucide="${icon}" class="w-4 h-4 inline"></i></span>`;
+    },
+
     renderStats() {
         const today = getLocalDateString();
         
@@ -600,19 +670,34 @@ window.app = {
         const selectedMonthPadded = (selectedMonthIndex + 1).toString().padStart(2, '0');
         const selectedMonthPrefix = `${selectedYear}-${selectedMonthPadded}`;
         
+        // Calculation pour le mois précédent (Trend)
+        const prevMonthDate = new Date(selectedYear, selectedMonthIndex - 1, 1);
+        const prevMonthPadded = (prevMonthDate.getMonth() + 1).toString().padStart(2, '0');
+        const prevMonthPrefix = `${prevMonthDate.getFullYear()}-${prevMonthPadded}`;
+
         // --- 2. GENERATION DES DATES POUR LE GRAPHIQUE/STATS ---
         const last7Days = [];
+        const prev7Days = []; // Pour Trend Semaine
+        
         // Pour les stats "Semaine", on garde toujours les 7 derniers jours réels
         for(let i=0; i<7; i++) {
             const d = new Date(); d.setDate(d.getDate() - i);
             const offset = d.getTimezoneOffset() * 60000;
             last7Days.push(new Date(d.getTime() - offset).toISOString().split('T')[0]);
         }
+        // Semaine précédente
+        for(let i=7; i<14; i++) {
+             const d = new Date(); d.setDate(d.getDate() - i);
+             const offset = d.getTimezoneOffset() * 60000;
+             prev7Days.push(new Date(d.getTime() - offset).toISOString().split('T')[0]);
+        }
 
         // ACCUMULATEURS
         let dailyTotal = 0;
         let weeklyTotal = 0;
+        let prevWeeklyTotal = 0; // Trend
         let monthlyTotal = 0;
+        let prevMonthlyTotal = 0; // Trend
         
         // SETS POUR COMPTER LES ELEVES UNIQUES ACTIFS
         let weeklyActiveStudents = new Set();
@@ -623,8 +708,10 @@ window.app = {
         window.appState.sessions.forEach(sess => {
             const isToday = sess.id === today;
             const isRealWeek = last7Days.includes(sess.id);
+            const isPrevWeek = prev7Days.includes(sess.id);
             // Est-ce que cette session appartient au mois SÉLECTIONNÉ ?
             const isSelectedMonth = sess.id.startsWith(selectedMonthPrefix);
+            const isPrevMonth = sess.id.startsWith(prevMonthPrefix);
 
             Object.entries(sess.results).forEach(([sid, r]) => {
                 const t = r.total || 0;
@@ -637,6 +724,9 @@ window.app = {
                         weeklyActiveStudents.add(sid);
                         weeklyStudentTimes[sid] = (weeklyStudentTimes[sid] || 0) + t;
                     }
+                    if (isPrevWeek) {
+                        prevWeeklyTotal += t;
+                    }
                     
                     // Les stats "Mois" suivent la navigation
                     if (isSelectedMonth) {
@@ -647,6 +737,10 @@ window.app = {
                         if(!monthlyStudentStats[sid]) monthlyStudentStats[sid] = { total: 0, sessionsCount: 0 };
                         monthlyStudentStats[sid].total += t;
                         monthlyStudentStats[sid].sessionsCount += 1;
+                    }
+
+                    if (isPrevMonth) {
+                        prevMonthlyTotal += t;
                     }
                 }
             });
@@ -660,15 +754,15 @@ window.app = {
         const avgMonth = monthlyActiveStudents.size > 0 ? (monthlyTotal / monthCount) : 0;
         const activeStudentTotal = monthlyActiveStudents.size;
 
-        // MISE A JOUR DU DOM
+        // MISE A JOUR DU DOM AVEC TENDANCES
         const elDaily = document.getElementById('stat-daily-hours');
         if(elDaily) elDaily.innerText = this.formatDurationHM(dailyTotal);
         
         const elWeekly = document.getElementById('stat-weekly-hours');
-        if(elWeekly) elWeekly.innerText = this.formatDurationHM(weeklyTotal);
+        if(elWeekly) elWeekly.innerHTML = `${this.formatDurationHM(weeklyTotal)} ${this.renderTrend(weeklyTotal, prevWeeklyTotal)}`;
         
         const elMonthly = document.getElementById('stat-monthly-hours');
-        if(elMonthly) elMonthly.innerText = this.formatDurationHM(monthlyTotal);
+        if(elMonthly) elMonthly.innerHTML = `${this.formatDurationHM(monthlyTotal)} ${this.renderTrend(monthlyTotal, prevMonthlyTotal)}`;
         
         const elAvgWeek = document.getElementById('stat-avg-week');
         if(elAvgWeek) elAvgWeek.innerText = this.formatDurationMS(avgWeek);

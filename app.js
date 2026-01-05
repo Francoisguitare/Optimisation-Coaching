@@ -441,34 +441,6 @@ window.app = {
         if (window.lucide) window.lucide.createIcons();
     },
 
-    renderStudents() {
-        const container = document.getElementById('students-list-container');
-        if (!container) return;
-        if (!window.appState.students || window.appState.students.length === 0) {
-            container.innerHTML = '<div class="text-slate-400 text-center text-sm py-4">Ajoutez votre premier élève ci-dessus.</div>';
-            return;
-        }
-        container.innerHTML = window.appState.students.map(s => `
-            <div class="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-100 shadow-sm">
-                <div class="flex items-center gap-3">
-                    <div class="h-8 w-8 bg-indigo-50 text-indigo-600 rounded-full flex items-center justify-center font-bold text-xs">
-                        ${s.name.charAt(0)}
-                    </div>
-                    <span class="font-bold text-slate-700 text-sm">${s.name}</span>
-                </div>
-                <div class="flex items-center">
-                    <button onclick="window.app.editStudent('${s.id}')" class="text-slate-300 hover:text-indigo-500 transition-colors p-2">
-                        <i data-lucide="pencil" class="w-4 h-4"></i>
-                    </button>
-                    <button onclick="window.app.deleteStudent('${s.id}')" class="text-slate-300 hover:text-red-500 transition-colors p-2">
-                        <i data-lucide="trash-2" class="w-4 h-4"></i>
-                    </button>
-                </div>
-            </div>
-        `).join('');
-        if (window.lucide) window.lucide.createIcons();
-    },
-
     formatTime(s) {
         if (!s) return "00:00";
         const m = Math.floor(s / 60);
@@ -601,29 +573,23 @@ window.app = {
         let activeStudents = new Set();
         let studentTimes = {};
         
-        // Iterate all dates between start and end
-        const start = new Date(startStr);
-        const end = new Date(endStr);
-        
-        // Helper to loop dates
-        for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
-            const offset = d.getTimezoneOffset() * 60000;
-            const id = new Date(d.getTime() - offset).toISOString().split('T')[0];
-            
-            const sess = window.appState.sessions.find(s => s.id === id);
-            if (sess) {
+        // Robust filtering: Use string comparison on ISO dates (YYYY-MM-DD)
+        window.appState.sessions.forEach(sess => {
+            if (sess.id >= startStr && sess.id <= endStr) {
+                let hasActivity = false;
                 Object.entries(sess.results).forEach(([sid, r]) => {
                     const t = r.total || 0;
                     if (t > 0) {
                         totalTime += t;
-                        sessionsCount++; // Counting individual student sessions actually, or global sessions? 
-                        // Let's count "Active Sessions" (one student session = 1)
+                        // Count student-sessions (interventions)
+                        sessionsCount++; 
                         activeStudents.add(sid);
                         studentTimes[sid] = (studentTimes[sid] || 0) + t;
+                        hasActivity = true;
                     }
                 });
             }
-        }
+        });
         
         return { totalTime, sessionsCount, activeStudents, studentTimes };
     },
@@ -637,6 +603,7 @@ window.app = {
         
         // 2. Determine Previous Period Range for Comparison
         let prevDateBase;
+        // Shift base date back
         if (mode === 'month') {
             prevDateBase = new Date(currentMonthDate);
             prevDateBase.setMonth(prevDateBase.getMonth() - 1);
@@ -644,22 +611,30 @@ window.app = {
             prevDateBase = new Date(currentRange.startDateObj);
             prevDateBase.setDate(prevDateBase.getDate() - 7);
         }
-        // For week mode, we rely on the logic that selectedWeekIndex isn't used for prev calc, we just shift date
-        // Actually simpler: Just shift start/end by -1 month or -7 days
+        
+        // Use prevDateBase to get range. If mode is week, we just shifted the start date, so we reuse logic implicitly or manually.
         let prevStart = new Date(currentRange.start);
         let prevEnd = new Date(currentRange.end);
+        
         if (mode === 'month') {
-            // Naive month shift
              prevStart.setMonth(prevStart.getMonth() - 1);
-             prevEnd.setMonth(prevEnd.getMonth() - 1); // Careful with days in month (30/31), but good enough for trend
+             // Special case: End of month handling (e.g. March 31 -> Feb 28)
+             // Simpler: Just recalculate range for previous month using existing function?
+             // But we need to handle "Same week index" or "Relative".
+             // For Month mode, simply shifting start/end by 1 month works mostly, but string logic is safer.
+             // Actually, let's just use getDatesForPeriod with the shifted prevDateBase
+             // But getDatesForPeriod relies on dashboardDate global state for month selection implicitly? No, it takes `date` arg.
         } else {
             prevStart.setDate(prevStart.getDate() - 7);
             prevEnd.setDate(prevEnd.getDate() - 7);
         }
-        const offset = prevStart.getTimezoneOffset() * 60000;
+        
+        // Re-generate strings for Prev Range
+        const pOffset1 = prevStart.getTimezoneOffset() * 60000;
+        const pOffset2 = prevEnd.getTimezoneOffset() * 60000;
         const prevRange = {
-            start: new Date(prevStart.getTime() - offset).toISOString().split('T')[0],
-            end: new Date(prevEnd.getTime() - offset).toISOString().split('T')[0]
+            start: new Date(prevStart.getTime() - pOffset1).toISOString().split('T')[0],
+            end: new Date(prevEnd.getTime() - pOffset2).toISOString().split('T')[0]
         };
 
         // 3. Calculate Stats
@@ -682,8 +657,6 @@ window.app = {
         const prevAvgDay = prevStats.totalTime / daysInPeriod;
 
         // 4. Update UI
-        
-        // Update Labels & Nav Visibility
         const monthLabel = document.getElementById('dashboard-month-label');
         if (monthLabel) monthLabel.innerText = currentMonthDate.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
         
@@ -701,20 +674,16 @@ window.app = {
             }
         }
 
-        // Fill Cards (with Comparison)
         const updateCard = (id, val, prev, formatter) => {
             const el = document.getElementById(id);
-            if(el) el.innerHTML = `${formatter(val)} ${this.renderTrend(val, prev, true)}`; // True for "Lower is Better"
+            if(el) el.innerHTML = `${formatter(val)} ${this.renderTrend(val, prev, true)}`; 
         };
-        // For Counts (Active Students, Sessions), Higher is usually Better? User said "Durée de mes coachings".
-        // Let's assume Time metrics = Lower is Better. Count metrics = Higher is Better.
         
         updateCard('stat-total-period', currStats.totalTime, prevStats.totalTime, this.formatDurationHM);
         updateCard('stat-avg-day', currAvgDay, prevAvgDay, this.formatDurationHM);
         updateCard('stat-avg-student', currAvgStudent, prevAvgStudent, this.formatDurationHM);
         updateCard('stat-avg-session', currAvgSession, prevAvgSession, this.formatDurationMS);
         
-        // Counts (Inverted logic: False = Higher is Better)
         const elTotalSess = document.getElementById('stat-total-sessions');
         if(elTotalSess) elTotalSess.innerHTML = `${currStats.sessionsCount} ${this.renderTrend(currStats.sessionsCount, prevStats.sessionsCount, false)}`;
 
@@ -769,7 +738,6 @@ window.app = {
             let labels = [];
             let dataPoints = [];
             
-            // Generate labels based on Period Range
             const start = new Date(currentRange.start);
             const end = new Date(currentRange.end);
             for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {

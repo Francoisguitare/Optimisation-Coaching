@@ -525,38 +525,63 @@ window.app = {
             label = start.toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' });
         } else {
             // Week Mode
-            // Calculate weeks in month
-            let firstDayOfMonth = new Date(year, month, 1);
-            let dayOfWeek = firstDayOfMonth.getDay(); // 0 (Sun) - 6 (Sat)
-            let startOffset = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek; // Adjust to Monday
-            if(dayOfWeek === 1) startOffset = 0;
             
-            // If weekIndex is -1 (default), try to find "current" week if we are in current month, else first week
+            // Helper: Calculate week range for a logical index (0 = week containing 1st of month logic, etc.)
+            const getWeekRange = (idx) => {
+                let s = new Date(year, month, 1 + (idx * 7));
+                // Align to Monday
+                let day = s.getDay();
+                let diff = s.getDate() - day + (day == 0 ? -6 : 1); 
+                s.setDate(diff);
+                
+                let e = new Date(s);
+                e.setDate(s.getDate() + 6);
+                return { start: s, end: e };
+            };
+
             let targetWeekIndex = weekIndex;
+            
+            // Auto-detect current week if index is -1
             if (targetWeekIndex === -1) {
                 const today = new Date();
+                today.setHours(0,0,0,0);
+                
+                // Only default to "Today's week" if we are viewing the current month
                 if (today.getMonth() === month && today.getFullYear() === year) {
-                     // Very rough approximation for default view
-                     targetWeekIndex = Math.floor((today.getDate() - 1) / 7);
+                     targetWeekIndex = 0; // Default fallback
+                     // Scan weeks to find which one contains today
+                     for(let i=0; i<6; i++) {
+                         const r = getWeekRange(i);
+                         // Normalize for comparison
+                         const rStart = new Date(r.start); rStart.setHours(0,0,0,0);
+                         const rEnd = new Date(r.end); rEnd.setHours(23,59,59,999);
+                         
+                         if (today >= rStart && today <= rEnd) {
+                             targetWeekIndex = i;
+                             break;
+                         }
+                     }
                 } else {
-                     targetWeekIndex = 0;
+                     targetWeekIndex = 0; // Default to first week for other months
                 }
             }
             window.appState.selectedWeekIndex = targetWeekIndex;
 
-            // Calculate Start Date of the specific week index
-            let weekStart = new Date(year, month, 1 + (targetWeekIndex * 7));
-            // Align to Monday
-            let day = weekStart.getDay();
-            let diff = weekStart.getDate() - day + (day == 0 ? -6 : 1); 
-            weekStart.setDate(diff);
-
-            let weekEnd = new Date(weekStart);
-            weekEnd.setDate(weekStart.getDate() + 6);
+            const range = getWeekRange(targetWeekIndex);
+            start = range.start;
+            end = range.end;
             
-            start = weekStart;
-            end = weekEnd;
-            label = `Semaine du ${start.getDate()} au ${end.getDate()}`;
+            // Formatting label
+            const startDay = start.getDate();
+            const endDay = end.getDate();
+            const startMonth = start.toLocaleDateString('fr-FR', { month: 'short' });
+            const endMonth = end.toLocaleDateString('fr-FR', { month: 'short' });
+            
+            if (start.getMonth() !== end.getMonth()) {
+                label = `${startDay} ${startMonth} - ${endDay} ${endMonth}`;
+            } else {
+                label = `Semaine du ${startDay} au ${endDay} ${endMonth}`;
+            }
         }
         
         // Return YYYY-MM-DD strings
@@ -618,12 +643,6 @@ window.app = {
         
         if (mode === 'month') {
              prevStart.setMonth(prevStart.getMonth() - 1);
-             // Special case: End of month handling (e.g. March 31 -> Feb 28)
-             // Simpler: Just recalculate range for previous month using existing function?
-             // But we need to handle "Same week index" or "Relative".
-             // For Month mode, simply shifting start/end by 1 month works mostly, but string logic is safer.
-             // Actually, let's just use getDatesForPeriod with the shifted prevDateBase
-             // But getDatesForPeriod relies on dashboardDate global state for month selection implicitly? No, it takes `date` arg.
         } else {
             prevStart.setDate(prevStart.getDate() - 7);
             prevEnd.setDate(prevEnd.getDate() - 7);

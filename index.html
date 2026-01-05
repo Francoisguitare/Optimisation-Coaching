@@ -95,68 +95,95 @@
         <!-- VIEW: STATS (DASHBOARD) -->
         <div id="view-stats" class="view-section h-full overflow-y-auto p-4 custom-scrollbar section-hidden">
             <div class="max-w-5xl mx-auto space-y-6">
-                <!-- Header with Month Navigation -->
-                <div class="flex flex-col md:flex-row justify-between md:items-end gap-4">
-                    <div>
-                        <h2 class="text-2xl font-black text-slate-800">Tableau de bord</h2>
-                        <p class="text-slate-500 text-sm">Métriques de performance</p>
-                    </div>
-                    <!-- Month Navigator -->
-                    <div class="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
-                        <button onclick="window.app.changeDashboardMonth(-1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
-                            <i data-lucide="chevron-left" class="w-5 h-5"></i>
-                        </button>
-                        <div class="px-4 font-bold text-slate-700 min-w-[140px] text-center capitalize" id="dashboard-month-label">
-                            --
+                
+                <!-- Controls Row -->
+                <div class="flex flex-col gap-4">
+                    <div class="flex justify-between items-end">
+                        <div>
+                            <h2 class="text-2xl font-black text-slate-800">Tableau de bord</h2>
+                            <p class="text-slate-500 text-sm">Analyse et Tendances</p>
                         </div>
-                        <button onclick="window.app.changeDashboardMonth(1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
-                            <i data-lucide="chevron-right" class="w-5 h-5"></i>
-                        </button>
+                        
+                        <!-- Month Navigator -->
+                        <div class="flex items-center bg-white rounded-xl border border-slate-200 shadow-sm p-1">
+                            <button onclick="window.app.changeDashboardMonth(-1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
+                                <i data-lucide="chevron-left" class="w-5 h-5"></i>
+                            </button>
+                            <div class="px-4 font-bold text-slate-700 min-w-[140px] text-center capitalize" id="dashboard-month-label">
+                                --
+                            </div>
+                            <button onclick="window.app.changeDashboardMonth(1)" class="p-2 hover:bg-slate-50 text-slate-500 rounded-lg transition-colors">
+                                <i data-lucide="chevron-right" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Mode Selector & Week Nav -->
+                    <div class="flex flex-wrap items-center gap-3">
+                         <div class="bg-slate-200 p-1 rounded-lg flex text-xs font-bold shrink-0">
+                            <button id="chart-btn-week" onclick="window.app?.toggleChart('week')" class="px-4 py-2 rounded-md transition-all">Semaine</button>
+                            <button id="chart-btn-month" onclick="window.app?.toggleChart('month')" class="px-4 py-2 rounded-md transition-all">Mois</button>
+                        </div>
+                        
+                        <!-- Week Navigator (Hidden by default) -->
+                        <div id="week-navigation-controls" class="flex items-center bg-white rounded-lg border border-slate-200 shadow-sm p-1 section-hidden">
+                            <button onclick="window.app.changeDashboardWeek(-1)" class="p-1.5 hover:bg-slate-50 text-slate-500 rounded-md transition-colors">
+                                <i data-lucide="chevron-left" class="w-4 h-4"></i>
+                            </button>
+                            <div class="px-3 font-bold text-slate-600 text-xs min-w-[150px] text-center" id="dashboard-week-label">
+                                Semaine en cours
+                            </div>
+                            <button onclick="window.app.changeDashboardWeek(1)" class="p-1.5 hover:bg-slate-50 text-slate-500 rounded-md transition-colors">
+                                <i data-lucide="chevron-right" class="w-4 h-4"></i>
+                            </button>
+                        </div>
                     </div>
                 </div>
 
                 <!-- Summary Cards: 3 Columns Grid -->
+                <!-- Note: IDs reused but content will be dynamic based on period -->
                 <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
-                    <!-- Daily -->
+                    
+                    <!-- Card 1: Total Time -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Aujourd'hui</p>
-                        <h3 id="stat-daily-hours" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
-                        <p class="text-[10px] text-indigo-500 font-medium">Temps Total</p>
+                        <p id="label-card-1" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Période</p>
+                        <h3 id="stat-total-period" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
+                        <p class="text-[10px] text-indigo-500 font-medium">Temps cumulé</p>
                     </div>
 
-                    <!-- Weekly -->
+                    <!-- Card 2: Avg per Day (or Session) -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Semaine</p>
-                        <h3 id="stat-weekly-hours" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
-                        <p class="text-[10px] text-emerald-500 font-medium">Temps Total</p>
+                        <p id="label-card-2" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne / Jour</p>
+                        <h3 id="stat-avg-day" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
+                        <p class="text-[10px] text-emerald-500 font-medium">Charge quotidienne</p>
                     </div>
 
-                    <!-- Monthly -->
+                    <!-- Card 3: Avg per Student -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p id="label-stat-month" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Mois</p>
-                        <h3 id="stat-monthly-hours" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
-                        <p class="text-[10px] text-blue-500 font-medium">Temps Total</p>
+                        <p id="label-card-3" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne / Élève</p>
+                        <h3 id="stat-avg-student" class="text-2xl font-black text-slate-800 mt-1">0h 0m</h3>
+                        <p class="text-[10px] text-blue-500 font-medium">Temps individuel</p>
                     </div>
 
-                    <!-- Avg Week -->
+                    <!-- Card 4: Avg per Session -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne Semaine</p>
-                        <h3 id="stat-avg-week" class="text-2xl font-black text-purple-600 mt-1">0m 0s</h3>
-                        <p class="text-[10px] text-purple-400 font-medium">Par élève actif</p>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne / Session</p>
+                        <h3 id="stat-avg-session" class="text-2xl font-black text-purple-600 mt-1">0m 0s</h3>
+                        <p class="text-[10px] text-purple-400 font-medium">Efficacité</p>
                     </div>
 
-                    <!-- Avg Month -->
+                    <!-- Card 5: Sessions Count -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p id="label-stat-avg-month" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Moyenne Mois</p>
-                        <h3 id="stat-avg-month" class="text-2xl font-black text-pink-600 mt-1">0m 0s</h3>
-                        <p class="text-[10px] text-pink-400 font-medium">Par élève actif</p>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Sessions</p>
+                        <h3 id="stat-total-sessions" class="text-2xl font-black text-pink-600 mt-1">0</h3>
+                        <p class="text-[10px] text-pink-400 font-medium">Volume d'interventions</p>
                     </div>
 
-                    <!-- Active Students -->
+                    <!-- Card 6: Active Students -->
                     <div class="bg-white p-4 rounded-2xl border border-slate-100 shadow-sm relative overflow-hidden">
-                        <p id="label-stat-students" class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Total Élèves</p>
+                        <p class="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Élèves Actifs</p>
                         <h3 id="stat-active-students" class="text-2xl font-black text-amber-600 mt-1">0</h3>
-                        <p class="text-[10px] text-amber-500 font-medium">Actifs au total</p>
+                        <p class="text-[10px] text-amber-500 font-medium">Sur la période</p>
                     </div>
                 </div>
 
@@ -165,13 +192,8 @@
                     <div class="flex justify-between items-center mb-6">
                         <h3 class="font-bold text-slate-800 flex items-center gap-2">
                             <i data-lucide="bar-chart-2" class="w-5 h-5 text-indigo-500"></i>
-                            Analyse Temporelle
+                            <span id="chart-title">Activité</span>
                         </h3>
-                        <!-- Period Selector -->
-                        <div class="bg-slate-100 p-1 rounded-lg flex text-[10px] font-bold">
-                            <button id="chart-btn-week" onclick="window.app?.toggleChart('week')" class="px-3 py-1 rounded text-slate-500 hover:bg-white/50 transition-all">Semaine</button>
-                            <button id="chart-btn-month" onclick="window.app?.toggleChart('month')" class="px-3 py-1 rounded bg-white text-indigo-600 shadow-sm transition-all">Mois</button>
-                        </div>
                     </div>
                     <div class="h-64 relative">
                         <canvas id="mainChart"></canvas>
@@ -179,12 +201,12 @@
                 </div>
 
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    <!-- Top Students Week -->
+                    <!-- Top Students -->
                     <div class="bg-white p-6 rounded-[2rem] border border-slate-100 shadow-sm">
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
                                 <i data-lucide="trophy" class="w-4 h-4 text-yellow-500"></i>
-                                Top 5 Élèves (Semaine)
+                                Top 5 (Période)
                             </h3>
                         </div>
                         <div id="dashboard-top-students" class="space-y-3">
@@ -197,7 +219,7 @@
                         <div class="flex justify-between items-center mb-4">
                             <h3 class="font-bold text-slate-800 text-sm flex items-center gap-2">
                                 <i data-lucide="medal" class="w-4 h-4 text-orange-500"></i>
-                                Classement Mensuel <span id="monthly-ranking-label" class="text-slate-400 font-normal ml-1"></span>
+                                Classement (Période) <span id="monthly-ranking-label" class="text-slate-400 font-normal ml-1"></span>
                             </h3>
                         </div>
                         <div id="dashboard-monthly-ranking" class="space-y-3 max-h-[300px] overflow-y-auto custom-scrollbar pr-2">

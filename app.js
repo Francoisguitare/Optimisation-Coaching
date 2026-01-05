@@ -543,16 +543,17 @@ window.app = {
             
             // Auto-detect current week if index is -1
             if (targetWeekIndex === -1) {
+                targetWeekIndex = 0; // Default fallback
+                
                 const today = new Date();
                 today.setHours(0,0,0,0);
                 
                 // Only default to "Today's week" if we are viewing the current month
                 if (today.getMonth() === month && today.getFullYear() === year) {
-                     targetWeekIndex = 0; // Default fallback
-                     // Scan weeks to find which one contains today
+                     // Check all weeks 0..5 to see which one contains today
                      for(let i=0; i<6; i++) {
                          const r = getWeekRange(i);
-                         // Normalize for comparison
+                         // Convert to comparable timestamps to avoid ambiguity
                          const rStart = new Date(r.start); rStart.setHours(0,0,0,0);
                          const rEnd = new Date(r.end); rEnd.setHours(23,59,59,999);
                          
@@ -561,8 +562,6 @@ window.app = {
                              break;
                          }
                      }
-                } else {
-                     targetWeekIndex = 0; // Default to first week for other months
                 }
             }
             window.appState.selectedWeekIndex = targetWeekIndex;
